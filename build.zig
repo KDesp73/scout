@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const Janitor = @import("janitor.zig").Janitor;
+const Janitor = @import("janitor.zig");
 
 pub fn build(b: *std.Build) void {
     var j = Janitor.init(b);

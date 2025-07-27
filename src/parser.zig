@@ -11,6 +11,25 @@ headers: std.StringHashMap([]u8),
 body: std.ArrayList(u8),
 links: std.ArrayList([]u8),
 
+pub const Page = struct {
+    url: []const u8,
+    title: []const u8,
+    keywords: []const u8,
+    description: []const u8,
+    body: []const u8,
+    links: [][]u8,
+};
+pub fn printPage(page: Page) void {
+    std.debug.print("URL: {s}\n", .{page.url});
+    std.debug.print("Title: {s}\n", .{page.title});
+    std.debug.print("Keywords: {s}\n", .{page.keywords});
+    std.debug.print("Description: {s}\n", .{page.description});
+    std.debug.print("Links: {}\n", .{page.links.len});
+    for (page.links) |link| {
+        std.debug.print("    {s}\n", .{link});
+    }
+}
+
 pub fn init(alloc: std.mem.Allocator, host: []const u8, port: u16) Parser {
     return Parser{
         .host = host,
@@ -36,10 +55,10 @@ pub fn deinit(self: *Parser) void {
     self.links.deinit();
 }
 
-pub fn parse(self: *Parser) !void {
+pub fn parse(self: *Parser) !?Page {
     var tcp = std.net.tcpConnectToHost(self.alloc, self.host, self.port) catch |err| switch (err) {
-        error.InvalidIPAddressFormat => return,
-        else => return err
+        error.InvalidIPAddressFormat => return null,
+        else => return err,
     };
     defer tcp.close();
 
@@ -83,7 +102,6 @@ pub fn parse(self: *Parser) !void {
                 if (std.mem.indexOfScalar(u8, line, ':')) |colon| {
                     const key = std.mem.trim(u8, line[0..colon], " ");
                     const value = std.mem.trim(u8, line[colon + 1..], " ");
-
                     const key_owned = try self.alloc.dupe(u8, key);
                     const value_owned = try self.alloc.dupe(u8, value);
                     try self.headers.put(key_owned, value_owned);
@@ -106,7 +124,7 @@ pub fn parse(self: *Parser) !void {
                     };
                     if (size == 0) break;
                     received += size;
-                    try self.body.appendSlice(std.mem.trim(u8, chunk[0..size], " \r\n"));
+                    try self.body.appendSlice(chunk[0..size]);
                 }
             } else {
                 while (true) {
@@ -115,13 +133,62 @@ pub fn parse(self: *Parser) !void {
                         else => return err,
                     };
                     if (size == 0) break;
-                    try self.body.appendSlice(std.mem.trim(u8, chunk[0..size], " \r\n"));
+                    try self.body.appendSlice(chunk[0..size]);
                 }
             }
+
             break;
         }
     }
+
+    for (self.links.items) |link| self.alloc.free(link);
+    self.links.deinit();
     self.links = try self.extractLinks();
+
+    const links_slice = try self.links.toOwnedSlice();
+    var page_links = std.ArrayList([]u8).init(self.alloc);
+
+    defer page_links.deinit();
+
+    // Deep copy each link string so `Page` owns its own copies.
+    for (links_slice) |link| {
+        const copy = try self.alloc.dupe(u8, link);
+        try page_links.append(copy);
+    }
+
+    // Now build Page with owned links:
+    return Page{
+        .url = try std.fmt.allocPrint(self.alloc, "https://{s}{s}", .{self.host, self.path}),
+        .title = try self.extractTitle(),
+        .keywords = try self.extractMeta("keywords"),
+        .description = try self.extractMeta("description"),
+        .body = try self.body.toOwnedSlice(),
+        .links = try page_links.toOwnedSlice(),
+    };
+}
+
+fn extractTitle(self: *Parser) ![]const u8 {
+    const start_tag = "<title>";
+    const end_tag = "</title>";
+
+    const start = std.mem.indexOf(u8, self.body.items, start_tag) orelse return "";
+    const end = std.mem.indexOf(u8, self.body.items, end_tag) orelse return "";
+
+    const title_start = start + start_tag.len;
+    if (title_start >= end) return "";
+
+    return try self.alloc.dupe(u8, self.body.items[title_start..end]);
+}
+
+fn extractMeta(self: *Parser, name: []const u8) ![]const u8 {
+    const pattern = try std.fmt.allocPrint(self.alloc, "<meta name=\"{s}\" content=\"", .{name});
+    defer self.alloc.free(pattern);
+
+    const start = std.mem.indexOf(u8, self.body.items, pattern) orelse return "";
+    const after = self.body.items[start + pattern.len..];
+
+    const end_quote = std.mem.indexOfScalar(u8, after, '"') orelse return "";
+    return try self.alloc.dupe(u8, after[0..end_quote]);
 }
 
 fn extractLinks(self: *Parser) !std.ArrayList([]u8) {

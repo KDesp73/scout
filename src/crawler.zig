@@ -1,15 +1,20 @@
 const std = @import("std");
 const Parser = @import("parser.zig");
+const Page = Parser.Page;
 
 const Crawler = @This();
 
 alloc: std.mem.Allocator,
 visited: std.StringHashMap(void),
+queue: std.ArrayList([]u8),
 
-pub fn init(alloc: std.mem.Allocator) Crawler{
-    return Crawler {
+const MAX_QUEUE_SIZE = 10_000;
+
+pub fn init(alloc: std.mem.Allocator) Crawler {
+    return Crawler{
         .alloc = alloc,
-        .visited = std.StringHashMap(void).init(alloc)
+        .visited = std.StringHashMap(void).init(alloc),
+        .queue = std.ArrayList([]u8).init(alloc),
     };
 }
 
@@ -17,28 +22,33 @@ pub fn deinit(self: *Crawler) void {
     var it = self.visited.iterator();
     while (it.next()) |entry| self.alloc.free(entry.key_ptr.*);
     self.visited.deinit();
+
+    for (self.queue.items) |url| self.alloc.free(url);
+    self.queue.deinit();
 }
 
-fn normalizeUrl(base: []const u8, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
-    if (std.mem.startsWith(u8, path, "http://") or std.mem.startsWith(u8, path, "https://")) {
-        return allocator.dupe(u8, path);
-    }
-
-    return try std.fmt.allocPrint(allocator, "https://{s}{s}", .{base, path});
+pub fn appendQ(self: *Crawler, url: []const u8) !void {
+    const normalized = try normalizeUrl("https://", url, self.alloc);
+    try self.queue.append(normalized);
 }
 
-pub fn crawl(self: *Crawler, seed: []const u8, max_depth: usize) !void {
-    var queue = std.ArrayList([]u8).init(self.alloc);
-    defer {
-        for (queue.items) |url| self.alloc.free(url);
-        queue.deinit();
+fn normalizeUrl(base_scheme: []const u8, url: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    if (std.mem.startsWith(u8, url, "http://") or std.mem.startsWith(u8, url, "https://")) {
+        return allocator.dupe(u8, url);
     }
 
-    try queue.append(try self.alloc.dupe(u8, seed));
-    var current_depth: usize = 0;
+    const full_url = try std.fmt.allocPrint(allocator, "{s}{s}", .{ base_scheme, url });
 
-    while (queue.items.len > 0 and current_depth < max_depth) {
-        const url = queue.orderedRemove(0);
+    return full_url;
+}
+
+pub fn crawl(self: *Crawler, max_pages: usize) !void {
+    var crawled: usize = 0;
+
+    while (self.queue.items.len > 0 and crawled < max_pages) {
+        if (self.queue.items.len >= MAX_QUEUE_SIZE) break;
+
+        const url = self.queue.orderedRemove(0);
 
         if (self.visited.contains(url)) {
             self.alloc.free(url);
@@ -48,7 +58,6 @@ pub fn crawl(self: *Crawler, seed: []const u8, max_depth: usize) !void {
         try self.visited.put(try self.alloc.dupe(u8, url), {});
         std.debug.print("Crawling: {s}\n", .{url});
 
-        // Extract host and path from URL
         const without_scheme = url["https://".len..];
         const slash_index = std.mem.indexOfScalar(u8, without_scheme, '/') orelse without_scheme.len;
         const host = without_scheme[0..slash_index];
@@ -61,22 +70,30 @@ pub fn crawl(self: *Crawler, seed: []const u8, max_depth: usize) !void {
         parser.path = path;
         defer parser.deinit();
 
-        parser.parse() catch |err| {
+        const page = parser.parse() catch |err| {
             std.debug.print("Failed to parse {s}: {}\n", .{url, err});
+            self.alloc.free(url);
             continue;
         };
 
-
-        for (parser.links.items) |link| {
+        for (page.?.links) |link| {
             const normalized = normalizeUrl(host, link, self.alloc) catch continue;
             if (!self.visited.contains(normalized)) {
-                try queue.append(normalized);
+                try self.queue.append(normalized);
             } else {
                 self.alloc.free(normalized);
             }
         }
 
+        Parser.printPage(page.?);
+
         self.alloc.free(url);
-        current_depth += 1;
+        crawled += 1;
+    }
+}
+
+pub fn printQueue(self: *Crawler) void {
+    for (self.queue.items) |item| {
+        std.debug.print("{s}\n", .{item});
     }
 }

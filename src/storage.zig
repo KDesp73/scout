@@ -1,0 +1,1 @@
+const Storage = @This();
