@@ -8,6 +8,8 @@ port: u16,
 path: []const u8 = "/",
 alloc: std.mem.Allocator,
 headers: std.StringHashMap([]u8),
+body: std.ArrayList(u8),
+links: std.ArrayList([]u8),
 
 pub fn init(alloc: std.mem.Allocator, host: []const u8, port: u16) Parser {
     return Parser{
@@ -16,6 +18,8 @@ pub fn init(alloc: std.mem.Allocator, host: []const u8, port: u16) Parser {
         .path = "/",
         .alloc = alloc,
         .headers = std.StringHashMap([]u8).init(alloc),
+        .body = std.ArrayList(u8).init(alloc),
+        .links = std.ArrayList([]u8).init(alloc),
     };
 }
 
@@ -26,14 +30,21 @@ pub fn deinit(self: *Parser) void {
         self.alloc.free(entry.value_ptr.*);
     }
     self.headers.deinit();
+    self.body.deinit();
+
+    for (self.links.items) |link| self.alloc.free(link);
+    self.links.deinit();
 }
 
 pub fn parse(self: *Parser) !void {
-    var tcp = try std.net.tcpConnectToHost(self.alloc, self.host, self.port);
+    var tcp = std.net.tcpConnectToHost(self.alloc, self.host, self.port) catch |err| switch (err) {
+        error.InvalidIPAddressFormat => return,
+        else => return err
+    };
     defer tcp.close();
 
     const tls_config = std.crypto.tls.Client.Options{
-        .ca = .no_verification, // TODO: enable verification
+        .ca = .no_verification,
         .host = .no_verification,
     };
 
@@ -42,11 +53,11 @@ pub fn parse(self: *Parser) !void {
     const request_fmt =
         "GET {s} HTTP/1.1\r\n" ++
         "Host: {s}\r\n" ++
-        "User-Agent: {s}\r\n" ++
+        "User-Agent: " ++ agent ++ "\r\n" ++
         "Connection: close\r\n\r\n";
 
     var request_buf: [512]u8 = undefined;
-    const request = try std.fmt.bufPrint(&request_buf, request_fmt, .{self.path, self.host, agent});
+    const request = try std.fmt.bufPrint(&request_buf, request_fmt, .{self.path, self.host});
     try tls_client.writeAll(tcp, request);
 
     var header_buf = std.ArrayList(u8).init(self.alloc);
@@ -79,17 +90,87 @@ pub fn parse(self: *Parser) !void {
                 }
             }
 
-            // TODO: parse body after headers
+            const body_start = end_index + end_seq.len;
+            const body_remainder = header_buf.items[body_start..];
+            try self.body.appendSlice(body_remainder);
 
+            if (self.headers.get("Content-Length")) |len_str| {
+                const content_length = try std.fmt.parseInt(usize, len_str, 10);
+                var received = body_remainder.len;
+
+                while (received < content_length) {
+                    const to_read = @min(content_length - received, chunk.len);
+                    const size = tls_client.read(tcp, chunk[0..to_read]) catch |err| switch (err) {
+                        error.TlsConnectionTruncated => 0,
+                        else => return err,
+                    };
+                    if (size == 0) break;
+                    received += size;
+                    try self.body.appendSlice(std.mem.trim(u8, chunk[0..size], " \r\n"));
+                }
+            } else {
+                while (true) {
+                    const size = tls_client.read(tcp, &chunk) catch |err| switch (err) {
+                        error.TlsConnectionTruncated => 0,
+                        else => return err,
+                    };
+                    if (size == 0) break;
+                    try self.body.appendSlice(std.mem.trim(u8, chunk[0..size], " \r\n"));
+                }
+            }
             break;
         }
     }
+    self.links = try self.extractLinks();
 }
 
-pub fn printHeaders(self: *Parser) !void {
-    var writer = std.io.getStdOut().writer();
+fn extractLinks(self: *Parser) !std.ArrayList([]u8) {
+    var links = std.ArrayList([]u8).init(self.alloc);
+
+    const pattern = "href=\"";
+    var i: usize = 0;
+
+    while (i < self.body.items.len) {
+        const remaining = self.body.items[i..];
+        const href_pos = std.mem.indexOf(u8, remaining, pattern);
+        if (href_pos == null) {
+            break;
+        }
+
+        i += href_pos.? + pattern.len;
+
+        const after_href = self.body.items[i..];
+        const quote_pos = std.mem.indexOfScalar(u8, after_href, '"');
+        if (quote_pos == null) break;
+
+        const url = after_href[0..quote_pos.?];
+
+        if (std.mem.startsWith(u8, url, "javascript:") or std.mem.startsWith(u8, url, "mailto:")) {
+            i += quote_pos.? + 1;
+            continue;
+        }
+
+        const url_copy = try self.alloc.dupe(u8, url);
+        try links.append(url_copy);
+
+        i += quote_pos.? + 1;
+    }
+
+    return links;
+}
+
+pub fn printHeaders(self: *Parser) void {
     var it = self.headers.iterator();
     while (it.next()) |entry| {
-        try writer.print("{s}: {s}\n", .{entry.key_ptr.*, entry.value_ptr.*});
+        std.debug.print("{s}: {s}\n", .{entry.key_ptr.*, entry.value_ptr.*});
     }
+}
+
+pub fn printBody(self: *Parser) !void {
+    std.debug.print("{s}\n", .{try self.body.toOwnedSlice()});
+}
+
+pub fn printLinks(self: *Parser) void {
+    std.debug.print("Count: {}\n", .{self.links.items.len});
+    for (self.links.items) |link| std.debug.print("- {s}\n", .{link});
 }

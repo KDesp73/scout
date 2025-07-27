@@ -1,16 +1,14 @@
 const std = @import("std");
 const Parser = @import("parser.zig");
+const Crawler = @import("crawler.zig");
 
 pub fn main() !void {
-    const hostname = "kdesp73.github.io";
-    const port = 443;
+    const hostname = "https://kdesp73.github.io";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const alloc = gpa.allocator();
 
-    var parser = Parser.init(alloc, hostname, port);
-    defer parser.deinit();
-
-    try parser.parse();
-    try parser.printHeaders();
+    var crawler = Crawler.init(alloc);
+    defer crawler.deinit();
+    try crawler.crawl(hostname, 10);
 }
