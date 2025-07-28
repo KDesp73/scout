@@ -16,7 +16,8 @@ pub const Page = struct {
     title: []const u8,
     keywords: []const u8,
     description: []const u8,
-    body: []const u8,
+    body: []const u8, // full body
+    content: []const u8, // striped body
     links: [][]u8,
 };
 pub fn printPage(page: Page) void {
@@ -164,9 +165,113 @@ pub fn parse(self: *Parser) !?Page {
         .title = try self.extractTitle(),
         .keywords = try self.extractMeta("keywords"),
         .description = try self.extractMeta("description"),
+        .content = try self.stripBody(),
         .body = try self.body.toOwnedSlice(),
         .links = try page_links.toOwnedSlice(),
     };
+}
+
+fn stripBody(self: *Parser) ![]const u8 {
+    const start_tag = "<body";
+    const end_tag = "</body>";
+
+    const body_start_pos = std.mem.indexOf(u8, self.body.items, start_tag) orelse return "";
+    const after_body_tag = self.body.items[body_start_pos..];
+    const body_open_end = std.mem.indexOfScalar(u8, after_body_tag, '>') orelse return "";
+    const content_start = body_start_pos + body_open_end + 1;
+
+    const end_pos = std.mem.indexOf(u8, self.body.items, end_tag) orelse return "";
+    if (content_start >= end_pos) return "";
+
+    const inner = self.body.items[content_start..end_pos];
+
+    const alloc = self.alloc;
+    var text = std.ArrayList(u8).init(alloc);
+    var i: usize = 0;
+    var inside_tag = false;
+    var skipping_script_or_style = false;
+    var skipping_comment = false;
+
+    while (i < inner.len) {
+        if (!inside_tag and inner[i] == '<') {
+            inside_tag = true;
+
+            // Check for comment
+            if (std.mem.startsWith(u8, inner[i..], "<!--")) {
+                skipping_comment = true;
+            }
+
+            // Check for <script> or <style>
+            if (std.mem.startsWith(u8, inner[i..], "<script") or std.mem.startsWith(u8, inner[i..], "<style")) {
+                skipping_script_or_style = true;
+            }
+            i += 1;
+            continue;
+        }
+
+        if (inside_tag and inner[i] == '>') {
+            const tag = inner[i..@min(i + 16, inner.len)];
+
+            // Check for end of script/style
+            if (skipping_script_or_style and
+                (std.mem.startsWith(u8, tag, "</script") or std.mem.startsWith(u8, tag, "</style")))
+            {
+                skipping_script_or_style = false;
+            }
+
+            // End of comment
+            if (skipping_comment and i >= 2 and std.mem.eql(u8, inner[i - 2..i + 1], "-->")) {
+                skipping_comment = false;
+            }
+
+            inside_tag = false;
+
+            // Insert space after block-level tag closings
+            if (std.mem.startsWith(u8, tag, "</p") or std.mem.startsWith(u8, tag, "<br") or
+                std.mem.startsWith(u8, tag, "</div") or std.mem.startsWith(u8, tag, "</li") or
+                std.mem.startsWith(u8, tag, "<hr"))
+            {
+                try text.append(' ');
+            }
+
+            i += 1;
+            continue;
+        }
+
+        if (!inside_tag and !skipping_script_or_style and !skipping_comment) {
+            if (inner[i] == '&') {
+                if (std.mem.startsWith(u8, inner[i..], "&nbsp;")) {
+                    try text.append(' ');
+                    i += 6;
+                    continue;
+                } else if (std.mem.startsWith(u8, inner[i..], "&lt;")) {
+                    try text.append('<');
+                    i += 4;
+                    continue;
+                } else if (std.mem.startsWith(u8, inner[i..], "&gt;")) {
+                    try text.append('>');
+                    i += 4;
+                    continue;
+                } else if (std.mem.startsWith(u8, inner[i..], "&amp;")) {
+                    try text.append('&');
+                    i += 5;
+                    continue;
+                } else if (std.mem.startsWith(u8, inner[i..], "&quot;")) {
+                    try text.append('"');
+                    i += 6;
+                    continue;
+                } else {
+                    try text.append(inner[i]);
+                }
+            } else {
+                try text.append(inner[i]);
+            }
+        }
+
+        i += 1;
+    }
+
+    return try text.toOwnedSlice();
 }
 
 fn extractTitle(self: *Parser) ![]const u8 {

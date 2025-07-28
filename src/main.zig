@@ -16,6 +16,8 @@ fn sigintHandler(_: c_int) callconv(.C) void {
 var config = struct {
     seed: ?[]const u8 = null,
     depth: u8 = 20,
+    pages: bool = false,
+    queue: bool = false,
 }{};
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -75,6 +77,27 @@ fn parseArgs(allocator: std.mem.Allocator) cli.AppRunner.Error!cli.ExecFn {
                             .action = .{ .exec = parseCommand }
                         },
                     },
+                    cli.Command {
+                        .name = "list",
+                        .description = cli.Description {
+                            .one_line = "List various collections"
+                        },
+                        .options = try r.allocOptions(&.{
+                            .{
+                                .long_name = "pages",
+                                .help = "List visited pages",
+                                .value_ref = r.mkRef(&config.pages),
+                            },
+                            .{
+                                .long_name = "queue",
+                                .help = "List queue",
+                                .value_ref = r.mkRef(&config.queue),
+                            },
+                        }),
+                        .target = cli.CommandTarget {
+                            .action = .{ .exec = listCommand }
+                        }
+                    }
                 }),
             },
         },
@@ -112,7 +135,9 @@ pub fn crawlCommand() !void {
         try crawler.loadQueue(&storage);
     }
 
-    try crawler.crawl(config.depth, &received_sigint);
+    try crawler.crawl(config.depth, &received_sigint);// catch |err| {
+    //     std.log.err("{}", .{err});
+    // };
 
     std.debug.print("Saving queue...\n", .{});
     try storage.emptyQueue();
@@ -128,4 +153,23 @@ pub fn parseCommand() !void {
     std.debug.print("\n", .{});
     Parser.printPage(page.?);
     std.debug.print("\n", .{});
+}
+
+pub fn listCommand() !void {
+    var storage = try Storage.init(alloc);
+    defer storage.deinit();
+
+    if(config.pages) {
+        const pages = try storage.getVisited();
+        for (pages) |url| {
+            std.debug.print("{s}\n", .{url});
+        }
+    } else if(config.queue) {
+        const queue = try storage.getQueue();
+        for(queue) |url| {
+            std.debug.print("{s}\n", .{url});
+        }
+    } else {
+        std.log.err("Use --pages or --queue", .{});
+    }
 }
