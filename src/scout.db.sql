@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS "Pages" (
 	PRIMARY KEY("url")
 );
 CREATE TABLE IF NOT EXISTS "Queue" (
-	"url"	TEXT NOT NULL
+	"url"	TEXT NOT NULL UNIQUE
 );
 CREATE INDEX IF NOT EXISTS "idx_pages_host" ON "Pages" (
 	"host"

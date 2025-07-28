@@ -184,14 +184,21 @@ pub fn crawlCommand() !void {
         try crawler.appendQ(s);
     } else {
         try crawler.loadQueue(&storage.?);
+        const loaded = crawler.queue.items.len;
+        if(loaded <= 0) {
+            std.log.warn("Nothing in queue. Please provide a seed host", .{});
+            return;
+        } else {
+            std.log.info("Loaded {} urls from queue", .{loaded});
+        }
     }
 
     try crawler.crawl(if(config.infinite) null else config.depth, &received_sigint);// catch |err| {
     //     std.log.err("{}", .{err});
     // };
 
-    std.debug.print("Saving queue...\n", .{});
-    try storage.?.emptyQueue();
+    std.log.info("Saving queue...\n", .{});
+    if(config.seed == null) try storage.?.emptyQueue();
     try storage.?.saveQueue(crawler.queue);
 }
 

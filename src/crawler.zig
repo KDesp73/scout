@@ -37,11 +37,11 @@ pub fn appendQ(self: *Crawler, url: []const u8) !void {
 fn normalizeUrl(base_scheme: []const u8, url: []const u8, allocator: std.mem.Allocator) ![]u8 {
     if (std.mem.startsWith(u8, url, "http://") or std.mem.startsWith(u8, url, "https://")) {
         return allocator.dupe(u8, url);
+    } else if (std.mem.startsWith(u8, url, "//")) {
+        return std.fmt.allocPrint(allocator, "{s}:{s}", .{ base_scheme, url });
+    } else {
+        return std.fmt.allocPrint(allocator, "{s}{s}", .{ base_scheme, url });
     }
-
-    const full_url = try std.fmt.allocPrint(allocator, "{s}{s}", .{ base_scheme, url });
-
-    return full_url;
 }
 
 pub fn loadVisited(self: *Crawler, storage: *Storage) !void {
@@ -65,8 +65,6 @@ pub fn crawl(self: *Crawler, max_pages: ?usize, sigint: *bool) !void {
     defer storage.deinit();
 
     while ((max_pages == null) or (self.queue.items.len > 0 and crawled < max_pages.?)) {
-        if (self.queue.items.len >= MAX_QUEUE_SIZE) break;
-
         if (sigint.*) {
             std.debug.print("SIGINT caught — stopping crawl\n", .{});
             break;
