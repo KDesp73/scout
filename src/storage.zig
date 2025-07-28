@@ -1,14 +1,74 @@
 const std = @import("std");
-const Storage = @This();
-const Page = @import("parser.zig").Page;
 const sqlite = @import("sqlite");
+const Page = @import("parser.zig").Page;
 
-const DB_PATH = "data/search.db";
+const Storage = @This();
+
+pub const DB_PATH = "data/scout.db";
+pub const SETUP_MIGRATION = @embedFile("scout.db.sql");
 
 db: sqlite.Db,
 alloc: std.mem.Allocator,
 
+const FileType = enum {
+    not_found,
+    file,
+    directory,
+    symlink,
+    other,
+};
+
+fn pathExists(path: []const u8) FileType {
+    const stat = std.fs.cwd().statFile(path) catch return .not_found;
+    return switch (stat.kind) {
+        .file => .file,
+        .directory => .directory,
+        .sym_link => .symlink,
+        else => .other,
+    };
+}
+
+pub fn runMigration(dbPath: [:0]const u8, migration: []const u8) !void {
+    var db = try sqlite.Db.init(.{
+            .mode = sqlite.Db.Mode{ .File = dbPath },
+            .open_flags = .{
+                .write = true,
+                .create = true,
+            },
+            .threading_mode = .MultiThread,
+        });
+
+    const c = sqlite.c;
+
+    if(c.sqlite3_enable_load_extension(db.db, 1) != c.SQLITE_OK) {
+        std.log.err("Could not enable loading extensions", .{});
+        return error.SQLiteError;
+    }
+
+    const err_msg: [*c][*c]u8 = null;
+    const rc = c.sqlite3_load_extension(
+        db.db,
+        "./exts/fts5.so",
+        null,
+        err_msg
+    );
+
+    if (rc != c.SQLITE_OK) {
+        if(err_msg != null){
+            std.log.err("Failed to load extension: {s}", .{err_msg.?.*});
+        }
+        return error.SQLiteError;
+    }
+
+    var diags = sqlite.Diagnostics{};
+    db.execMulti(migration, .{ .diags = &diags }) catch {};
+}
+
 pub fn init(alloc: std.mem.Allocator) !Storage {
+    if (pathExists(Storage.DB_PATH) != .file) {
+        return error.InitializationNeeded;
+    }
+
     const self = Storage {
         .alloc = alloc,
         .db = try sqlite.Db.init(.{
@@ -16,7 +76,7 @@ pub fn init(alloc: std.mem.Allocator) !Storage {
             .open_flags = .{
                 .write = true,
                 .create = true,
-                
+
             },
             .threading_mode = .MultiThread,
         }),

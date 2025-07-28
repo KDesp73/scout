@@ -35,6 +35,13 @@ fn parseArgs(allocator: std.mem.Allocator) cli.AppRunner.Error!cli.ExecFn {
             },
             .target = cli.CommandTarget{
                 .subcommands = try r.allocCommands(&.{
+                    cli.Command{
+                        .name = "init",
+                        .description = cli.Description{
+                            .one_line = "Initialize the search engine",
+                        },
+                        .target = .{ .action = .{ .exec = initCommand } }
+                    },
 
                     cli.Command{
                         .name = "crawl",
@@ -134,6 +141,7 @@ pub fn main() anyerror!void {
     _ = c.signal(c.SIGINT, sigintHandler);
 
     const action = try parseArgs(alloc);
+
     const r = action();
 
     if(config.seed != null)
@@ -142,8 +150,18 @@ pub fn main() anyerror!void {
     return r;
 }
 
+pub fn initCommand() !void {
+    try Storage.runMigration(Storage.DB_PATH, Storage.SETUP_MIGRATION);
+}
+
 pub fn crawlCommand() !void {
-    var storage = try Storage.init(alloc);
+    var storage = Storage.init(alloc) catch |err| switch (err) {
+        error.InitializationNeeded => {
+            std.log.err("Database not found. Run `scout init`.", .{});
+            return;
+        },
+        else => return err,
+    };
     defer storage.deinit();
 
     var crawler = Crawler.init(alloc);
@@ -178,7 +196,13 @@ pub fn parseCommand() !void {
 }
 
 pub fn listCommand() !void {
-    var storage = try Storage.init(alloc);
+    var storage = Storage.init(alloc) catch |err| switch (err) {
+        error.InitializationNeeded => {
+            std.log.err("Database not found. Run `scout init`.", .{});
+            return;
+        },
+        else => return err,
+    };
     defer storage.deinit();
 
     if(config.pages) {
@@ -197,7 +221,13 @@ pub fn listCommand() !void {
 }
 
 pub fn queryCommand() !void {
-    var storage = try Storage.init(alloc);
+    var storage = Storage.init(alloc) catch |err| switch (err) {
+        error.InitializationNeeded => {
+            std.log.err("Database not found. Run `scout init`.", .{});
+            return;
+        },
+        else => return err,
+    };
     defer storage.deinit();
 
     const results = try storage.search(config.query.?);

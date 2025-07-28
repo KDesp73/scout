@@ -17,7 +17,9 @@
 
     .paths = .{
         "build.zig",
+        "janitor.zig",
         "build.zig.zon",
         "src",
+        "README.md"
     },
 }
