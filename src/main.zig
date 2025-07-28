@@ -150,29 +150,34 @@ pub fn main() anyerror!void {
     return r;
 }
 
+fn getStorage() !?Storage {
+    return Storage.init(alloc) catch |err| switch (err) {
+        error.InitializationNeeded => {
+            std.log.err("Database not found. Run `scout init`.", .{});
+            return null;
+        },
+        else => return err,
+    };
+}
+
 pub fn initCommand() !void {
     try Storage.runMigration(Storage.DB_PATH, Storage.SETUP_MIGRATION);
 }
 
 pub fn crawlCommand() !void {
-    var storage = Storage.init(alloc) catch |err| switch (err) {
-        error.InitializationNeeded => {
-            std.log.err("Database not found. Run `scout init`.", .{});
-            return;
-        },
-        else => return err,
-    };
-    defer storage.deinit();
+    var storage = try getStorage();
+    if(storage == null) return;
+    defer storage.?.deinit();
 
     var crawler = Crawler.init(alloc);
     defer crawler.deinit();
 
-    try crawler.loadVisited(&storage);
+    try crawler.loadVisited(&storage.?);
 
     if(config.seed) |s| {
         try crawler.appendQ(s);
     } else {
-        try crawler.loadQueue(&storage);
+        try crawler.loadQueue(&storage.?);
     }
 
     try crawler.crawl(config.depth, &received_sigint);// catch |err| {
@@ -180,8 +185,8 @@ pub fn crawlCommand() !void {
     // };
 
     std.debug.print("Saving queue...\n", .{});
-    try storage.emptyQueue();
-    try storage.saveQueue(crawler.queue);
+    try storage.?.emptyQueue();
+    try storage.?.saveQueue(crawler.queue);
 }
 
 pub fn parseCommand() !void {
@@ -196,22 +201,17 @@ pub fn parseCommand() !void {
 }
 
 pub fn listCommand() !void {
-    var storage = Storage.init(alloc) catch |err| switch (err) {
-        error.InitializationNeeded => {
-            std.log.err("Database not found. Run `scout init`.", .{});
-            return;
-        },
-        else => return err,
-    };
-    defer storage.deinit();
+    var storage = try getStorage();
+    if(storage == null) return;
+    defer storage.?.deinit();
 
     if(config.pages) {
-        const pages = try storage.getVisited();
+        const pages = try storage.?.getVisited();
         for (pages) |url| {
             std.debug.print("{s}\n", .{url});
         }
     } else if(config.queue) {
-        const queue = try storage.getQueue();
+        const queue = try storage.?.getQueue();
         for(queue) |url| {
             std.debug.print("{s}\n", .{url});
         }
@@ -221,16 +221,11 @@ pub fn listCommand() !void {
 }
 
 pub fn queryCommand() !void {
-    var storage = Storage.init(alloc) catch |err| switch (err) {
-        error.InitializationNeeded => {
-            std.log.err("Database not found. Run `scout init`.", .{});
-            return;
-        },
-        else => return err,
-    };
-    defer storage.deinit();
+    var storage = try getStorage();
+    if(storage == null) return;
+    defer storage.?.deinit();
 
-    const results = try storage.search(config.query.?);
+    const results = try storage.?.search(config.query.?);
     for (results) |page| {
         std.debug.print("{s} ({s})\n\n", .{page.title, page.url});
     }

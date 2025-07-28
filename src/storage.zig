@@ -28,37 +28,37 @@ fn pathExists(path: []const u8) FileType {
     };
 }
 
-pub fn runMigration(dbPath: [:0]const u8, migration: []const u8) !void {
-    var db = try sqlite.Db.init(.{
-            .mode = sqlite.Db.Mode{ .File = dbPath },
-            .open_flags = .{
-                .write = true,
-                .create = true,
-            },
-            .threading_mode = .MultiThread,
-        });
+fn openDatabase(path: [:0]const u8) !sqlite.Db {
+    return sqlite.Db.init(.{
+        .mode = .{ .File = path },
+        .open_flags = .{ .write = true, .create = true },
+        .threading_mode = .MultiThread,
+    });
+}
 
+// https://sqlite.org/loadext.html#build
+fn enableExtensions(db: *sqlite.Db) !void {
     const c = sqlite.c;
 
-    if(c.sqlite3_enable_load_extension(db.db, 1) != c.SQLITE_OK) {
+    if (c.sqlite3_enable_load_extension(db.db, 1) != c.SQLITE_OK) {
         std.log.err("Could not enable loading extensions", .{});
         return error.SQLiteError;
     }
 
     const err_msg: [*c][*c]u8 = null;
-    const rc = c.sqlite3_load_extension(
-        db.db,
-        "./exts/fts5.so",
-        null,
-        err_msg
-    );
+    const rc = c.sqlite3_load_extension(db.db, "./exts/fts5.so", null, err_msg);
 
     if (rc != c.SQLITE_OK) {
-        if(err_msg != null){
+        if (err_msg != null) {
             std.log.err("Failed to load extension: {s}", .{err_msg.?.*});
         }
         return error.SQLiteError;
     }
+}
+
+pub fn runMigration(dbPath: [:0]const u8, migration: []const u8) !void {
+    var db = try openDatabase(dbPath);
+    try enableExtensions(&db);
 
     var diags = sqlite.Diagnostics{};
     db.execMulti(migration, .{ .diags = &diags }) catch {};
@@ -71,39 +71,10 @@ pub fn init(alloc: std.mem.Allocator) !Storage {
 
     const self = Storage {
         .alloc = alloc,
-        .db = try sqlite.Db.init(.{
-            .mode = sqlite.Db.Mode{ .File = DB_PATH },
-            .open_flags = .{
-                .write = true,
-                .create = true,
-
-            },
-            .threading_mode = .MultiThread,
-        }),
+        .db = try openDatabase(DB_PATH)
     };
 
-    // https://sqlite.org/loadext.html#build
-    const c = sqlite.c;
-
-    if(c.sqlite3_enable_load_extension(self.db.db, 1) != c.SQLITE_OK) {
-        std.log.err("Could not enable loading extensions", .{});
-        return error.SQLiteError;
-    }
-
-    const err_msg: [*c][*c]u8 = null;
-    const rc = c.sqlite3_load_extension(
-        self.db.db,
-        "./exts/fts5.so",
-        null,
-        err_msg
-    );
-
-    if (rc != c.SQLITE_OK) {
-        if(err_msg != null){
-            std.log.err("Failed to load extension: {s}", .{err_msg.?.*});
-        }
-        return error.SQLiteError;
-    }
+    try enableExtensions(@constCast(&self.db));
 
     return self;
 }
