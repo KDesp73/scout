@@ -29,7 +29,7 @@ fn parseArgs(allocator: std.mem.Allocator) cli.AppRunner.Error!cli.ExecFn {
 
     const app = cli.App{
         .command = cli.Command{
-            .name = "search",
+            .name = "scout",
             .description = cli.Description{
                 .one_line = "A cli search engine",
             },

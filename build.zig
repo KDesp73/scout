@@ -5,7 +5,7 @@ const Janitor = @import("janitor.zig");
 pub fn build(b: *std.Build) void {
     var j = Janitor.init(b);
 
-    j.exe("search");
+    j.exe("scout");
     j.install();
     j.dep("sqlite");
     j.dep("cli");

@@ -1,8 +1,8 @@
 .{
-    .name = .search_engine,
+    .name = .scout,
     .version = "0.0.1",
     .minimum_zig_version = "0.14.1",
-    .fingerprint = 0x314a75921816d270,
+    .fingerprint = 0x176881647e85b273,
 
     .dependencies = .{
         .sqlite = .{
