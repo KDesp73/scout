@@ -1,6 +1,7 @@
 const std = @import("std");
 const Parser = @import("parser.zig");
 const Page = Parser.Page;
+const Storage = @import("storage.zig");
 
 const Crawler = @This();
 
@@ -28,6 +29,7 @@ pub fn deinit(self: *Crawler) void {
 }
 
 pub fn appendQ(self: *Crawler, url: []const u8) !void {
+    if(self.visited.contains(url)) return;
     const normalized = try normalizeUrl("https://", url, self.alloc);
     try self.queue.append(normalized);
 }
@@ -40,6 +42,18 @@ fn normalizeUrl(base_scheme: []const u8, url: []const u8, allocator: std.mem.All
     const full_url = try std.fmt.allocPrint(allocator, "{s}{s}", .{ base_scheme, url });
 
     return full_url;
+}
+
+pub fn load(self: *Crawler, storage: *Storage) !void {
+    var urls = try storage.getVisited();
+    for (urls) |u| {
+        try self.visited.put(u, {});
+    }
+
+    urls = try storage.getQueue();
+    for (urls) |u| {
+        try self.appendQ(u);
+    }
 }
 
 pub fn crawl(self: *Crawler, max_pages: usize) !void {
@@ -86,6 +100,8 @@ pub fn crawl(self: *Crawler, max_pages: usize) !void {
         }
 
         Parser.printPage(page.?);
+        var storage = try Storage.init(self.alloc);
+        try storage.store(page.?);
 
         self.alloc.free(url);
         crawled += 1;

@@ -1,0 +1,12 @@
+BEGIN TRANSACTION;
+CREATE TABLE IF NOT EXISTS "Pages" (
+	"title"	TEXT,
+	"description"	TEXT,
+	"keywords"	TEXT,
+	"url"	TEXT NOT NULL UNIQUE,
+	PRIMARY KEY("url")
+);
+CREATE TABLE IF NOT EXISTS "Queue" (
+	"url"	TEXT NOT NULL
+);
+COMMIT;

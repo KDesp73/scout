@@ -20,11 +20,11 @@ pub const Page = struct {
     links: [][]u8,
 };
 pub fn printPage(page: Page) void {
-    std.debug.print("URL: {s}\n", .{page.url});
-    std.debug.print("Title: {s}\n", .{page.title});
-    std.debug.print("Keywords: {s}\n", .{page.keywords});
-    std.debug.print("Description: {s}\n", .{page.description});
-    std.debug.print("Links: {}\n", .{page.links.len});
+    std.debug.print("{s}\n", .{page.url});
+    std.debug.print("  Title: {s}\n", .{page.title});
+    std.debug.print("  Keywords: {s}\n", .{page.keywords});
+    std.debug.print("  Description: {s}\n", .{page.description});
+    std.debug.print("  Links: {}\n", .{page.links.len});
     for (page.links) |link| {
         std.debug.print("    {s}\n", .{link});
     }
@@ -150,13 +150,11 @@ pub fn parse(self: *Parser) !?Page {
 
     defer page_links.deinit();
 
-    // Deep copy each link string so `Page` owns its own copies.
     for (links_slice) |link| {
         const copy = try self.alloc.dupe(u8, link);
         try page_links.append(copy);
     }
 
-    // Now build Page with owned links:
     return Page{
         .url = try std.fmt.allocPrint(self.alloc, "https://{s}{s}", .{self.host, self.path}),
         .title = try self.extractTitle(),
