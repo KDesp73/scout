@@ -17,6 +17,7 @@ var config = struct {
     seed: ?[]const u8 = null,
     query: ?[]const u8 = null,
     depth: u8 = 20,
+    infinite: bool = false,
     pages: bool = false,
     queue: bool = false,
 }{};
@@ -63,6 +64,11 @@ fn parseArgs(allocator: std.mem.Allocator) cli.AppRunner.Error!cli.ExecFn {
                                 .value_name = "INT",
                                 .required = false,
                             },
+                            .{
+                                .long_name = "infinite",
+                                .help = "Crawl until an interrupt",
+                                .value_ref = r.mkRef(&config.infinite),
+                            }
                         }),
                         .target = cli.CommandTarget{
                             .action = .{ .exec = crawlCommand }
@@ -180,7 +186,7 @@ pub fn crawlCommand() !void {
         try crawler.loadQueue(&storage.?);
     }
 
-    try crawler.crawl(config.depth, &received_sigint);// catch |err| {
+    try crawler.crawl(if(config.infinite) null else config.depth, &received_sigint);// catch |err| {
     //     std.log.err("{}", .{err});
     // };
 

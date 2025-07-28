@@ -58,13 +58,13 @@ pub fn loadQueue(self: *Crawler, storage: *Storage) !void {
     }
 }
 
-pub fn crawl(self: *Crawler, max_pages: usize, sigint: *bool) !void {
+pub fn crawl(self: *Crawler, max_pages: ?usize, sigint: *bool) !void {
     var crawled: usize = 0;
 
     var storage = try Storage.init(self.alloc);
     defer storage.deinit();
 
-    while (self.queue.items.len > 0 and crawled < max_pages) {
+    while ((max_pages == null) or (self.queue.items.len > 0 and crawled < max_pages.?)) {
         if (self.queue.items.len >= MAX_QUEUE_SIZE) break;
 
         if (sigint.*) {
