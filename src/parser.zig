@@ -145,6 +145,10 @@ pub fn parse(self: *Parser) !?Page {
     self.links.deinit();
     self.links = try self.extractLinks();
 
+    if(self.headers.get("Location")) |location| {
+        try self.links.append(location);
+    }
+
     const links_slice = try self.links.toOwnedSlice();
     var page_links = std.ArrayList([]u8).init(self.alloc);
 
@@ -233,9 +237,4 @@ pub fn printHeaders(self: *Parser) void {
 
 pub fn printBody(self: *Parser) !void {
     std.debug.print("{s}\n", .{try self.body.toOwnedSlice()});
-}
-
-pub fn printLinks(self: *Parser) void {
-    std.debug.print("Count: {}\n", .{self.links.items.len});
-    for (self.links.items) |link| std.debug.print("- {s}\n", .{link});
 }

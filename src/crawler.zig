@@ -44,13 +44,15 @@ fn normalizeUrl(base_scheme: []const u8, url: []const u8, allocator: std.mem.All
     return full_url;
 }
 
-pub fn load(self: *Crawler, storage: *Storage) !void {
-    var urls = try storage.getVisited();
+pub fn loadVisited(self: *Crawler, storage: *Storage) !void {
+    const urls = try storage.getVisited();
     for (urls) |u| {
         try self.visited.put(u, {});
     }
+}
 
-    urls = try storage.getQueue();
+pub fn loadQueue(self: *Crawler, storage: *Storage) !void {
+    const urls = try storage.getQueue();
     for (urls) |u| {
         try self.appendQ(u);
     }

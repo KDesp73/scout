@@ -8,6 +8,7 @@ pub fn build(b: *std.Build) void {
     j.exe("search");
     j.install();
     j.dep("sqlite");
+    j.dep("cli");
 
     _ = j.step(.clean);
     _ = j.step(.help);

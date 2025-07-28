@@ -27,6 +27,8 @@ pub fn deinit(self: *Storage) void {
 }
 
 pub fn store(self: *Storage, page: Page) !void {
+    try self.db.exec("BEGIN TRANSACTION;", .{}, .{});
+
     const query =
     \\INSERT INTO Pages(title, description, keywords, url) VALUES(?, ?, ?, ?)
     ;
@@ -43,6 +45,8 @@ pub fn store(self: *Storage, page: Page) !void {
         error.SQLiteConstraint => return,
         else => return err
     };
+
+    try self.db.exec("COMMIT;", .{}, .{});
 }
 
 pub fn getVisited(self:* Storage) ![][]const u8 {
@@ -69,6 +73,7 @@ pub fn emptyQueue(self: *Storage) !void {
 }
 
 pub fn saveQueue(self: *Storage, queue: std.ArrayList([]u8)) !void {
+    try self.db.exec("BEGIN TRANSACTION;", .{}, .{});
 
     const query =
     \\INSERT INTO Queue(url) VALUES(?)
@@ -77,12 +82,11 @@ pub fn saveQueue(self: *Storage, queue: std.ArrayList([]u8)) !void {
     var stmt = try self.db.prepare(query);
     defer stmt.deinit();
 
-    for(queue.items) |url| {
-        try stmt.exec(.{}, .{
-            .url = url
-        });
-        stmt.reset();
+    for (queue.items) |url| {
+        try stmt.exec(.{}, .{ .url = url });
     }
+
+    try self.db.exec("COMMIT;", .{}, .{});
 }
 
 pub fn getQueue(self: *Storage) ![][]const u8 {
