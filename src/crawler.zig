@@ -56,11 +56,16 @@ pub fn load(self: *Crawler, storage: *Storage) !void {
     }
 }
 
-pub fn crawl(self: *Crawler, max_pages: usize) !void {
+pub fn crawl(self: *Crawler, max_pages: usize, sigint: *bool) !void {
     var crawled: usize = 0;
 
     while (self.queue.items.len > 0 and crawled < max_pages) {
         if (self.queue.items.len >= MAX_QUEUE_SIZE) break;
+
+        if (sigint.*) {
+            std.debug.print("SIGINT caught — stopping crawl\n", .{});
+            break;
+        }
 
         const url = self.queue.orderedRemove(0);
 
