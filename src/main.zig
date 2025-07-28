@@ -15,6 +15,7 @@ fn sigintHandler(_: c_int) callconv(.C) void {
 
 var config = struct {
     seed: ?[]const u8 = null,
+    query: ?[]const u8 = null,
     depth: u8 = 20,
     pages: bool = false,
     queue: bool = false,
@@ -34,6 +35,7 @@ fn parseArgs(allocator: std.mem.Allocator) cli.AppRunner.Error!cli.ExecFn {
             },
             .target = cli.CommandTarget{
                 .subcommands = try r.allocCommands(&.{
+
                     cli.Command{
                         .name = "crawl",
                         .description = cli.Description{
@@ -59,6 +61,7 @@ fn parseArgs(allocator: std.mem.Allocator) cli.AppRunner.Error!cli.ExecFn {
                             .action = .{ .exec = crawlCommand }
                         },
                     },
+
                     cli.Command {
                         .name = "parse",
                         .description = cli.Description {
@@ -77,6 +80,7 @@ fn parseArgs(allocator: std.mem.Allocator) cli.AppRunner.Error!cli.ExecFn {
                             .action = .{ .exec = parseCommand }
                         },
                     },
+
                     cli.Command {
                         .name = "list",
                         .description = cli.Description {
@@ -96,6 +100,24 @@ fn parseArgs(allocator: std.mem.Allocator) cli.AppRunner.Error!cli.ExecFn {
                         }),
                         .target = cli.CommandTarget {
                             .action = .{ .exec = listCommand }
+                        }
+                    },
+
+                    cli.Command {
+                        .name = "query",
+                        .description = cli.Description {
+                            .one_line = "Search something"
+                        },
+                        .options = try r.allocOptions(&.{
+                            .{
+                                .long_name = "input",
+                                .help = "Your query",
+                                .value_ref = r.mkRef(&config.query),
+                                .required = true
+                            },
+                        }),
+                        .target = cli.CommandTarget {
+                            .action = .{ .exec = queryCommand }
                         }
                     }
                 }),
@@ -171,5 +193,15 @@ pub fn listCommand() !void {
         }
     } else {
         std.log.err("Use --pages or --queue", .{});
+    }
+}
+
+pub fn queryCommand() !void {
+    var storage = try Storage.init(alloc);
+    defer storage.deinit();
+
+    const results = try storage.search(config.query.?);
+    for (results) |page| {
+        std.debug.print("{s} ({s})\n\n", .{page.title, page.url});
     }
 }

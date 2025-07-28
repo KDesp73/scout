@@ -82,7 +82,7 @@ pub fn store(self: *Storage, page: Page) !void {
         page.title,
         page.description,
         page.keywords,
-        page.body,
+        page.content,
         host,
         page.url,
     });
@@ -172,4 +172,35 @@ pub fn getQueue(self: *Storage) ![][]const u8 {
 
     const urls = try stmt.all([]const u8, self.alloc, .{}, .{});
     return urls;
+}
+
+// TODO: put to query.zig maybe
+pub const PageResult = struct {
+    title: []const u8,
+    url: []const u8,
+};
+
+pub fn search(self: *Storage, term: []const u8) ![]PageResult {
+    const query =
+        \\SELECT title, url
+        \\FROM PageIndex
+        \\WHERE PageIndex MATCH ?;
+    ;
+
+    var stmt = try self.db.prepare(query);
+    defer stmt.deinit();
+
+    const rows = try stmt.all(struct {
+        title: []const u8,
+        url: []const u8,
+    }, self.alloc, .{}, .{ .query = term });
+
+    var results = try self.alloc.alloc(PageResult, rows.len);
+    for (rows, 0..) |row, i| {
+        results[i] = .{
+            .title = row.title,
+            .url = row.url,
+        };
+    }
+    return results;
 }
