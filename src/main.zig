@@ -17,6 +17,7 @@ var config = struct {
     seed: ?[]const u8 = null,
     query: ?[]const u8 = null,
     depth: u8 = 20,
+    count: usize = 2,
     infinite: bool = false,
     pages: bool = false,
     queue: bool = false,
@@ -132,6 +133,20 @@ fn parseArgs(allocator: std.mem.Allocator) cli.AppRunner.Error!cli.ExecFn {
                         .target = cli.CommandTarget {
                             .action = .{ .exec = queryCommand }
                         }
+                    },
+
+                    cli.Command {
+                        .name = "spawn",
+                        .description = .{ .one_line = "Spawn a certain number of crawlers" },
+                        .options = try r.allocOptions(&.{
+                            .{
+                                .long_name = "count",
+                                .help = "Specify the number of crawlers to spawn",
+                                .value_ref = r.mkRef(&config.count),
+                                .required = true
+                            }
+                        }),
+                        .target = .{ .action = .{ .exec = spawnCommand } }
                     }
                 }),
             },
@@ -197,7 +212,7 @@ pub fn crawlCommand() !void {
     //     std.log.err("{}", .{err});
     // };
 
-    std.log.info("Saving queue...\n", .{});
+    std.log.info("Saving queue...", .{});
     if(config.seed == null) try storage.?.emptyQueue();
     try storage.?.saveQueue(crawler.queue);
 }
@@ -242,4 +257,9 @@ pub fn queryCommand() !void {
     for (results) |page| {
         std.debug.print("{s} ({s})\n\n", .{page.title, page.url});
     }
+}
+
+pub fn spawnCommand() !void {
+    std.debug.print("Spawning {} crawlers...\n", .{config.count});
+    try Crawler.spawnAndRun(config.count, &received_sigint);
 }
