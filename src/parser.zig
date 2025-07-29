@@ -56,7 +56,59 @@ pub fn deinit(self: *Parser) void {
     self.links.deinit();
 }
 
+fn isAllowedByRobots(self: *Parser) !bool {
+    var client = try std.net.tcpConnectToHost(self.alloc, self.host, self.port);
+    defer client.close();
+
+    var tls = try std.crypto.tls.Client.init(client, .{
+        .ca = .no_verification,
+        .host = .no_verification,
+    });
+
+    const request = try std.fmt.allocPrint(self.alloc,
+        \\GET /robots.txt HTTP/1.1\r\n
+        \\Host: {s}\r\n
+        \\User-Agent: {s}\r\n
+        \\Connection: close\r\n
+        \\Accept: */*\r\n\r\n
+    , .{ self.host, agent });
+
+    try tls.writeAll(client, request);
+
+    var buf: [4096]u8 = undefined;
+    const n = try tls.readAll(client, &buf);
+    const response = buf[0..n];
+
+    if (!std.mem.containsAtLeast(u8, response, 1, "200 OK")) return true;
+
+    var lines = std.mem.tokenizeAny(u8, response, "\r\n");
+    var allow = true;
+    var match_agent = false;
+
+    while (lines.next()) |line| {
+        if (std.mem.startsWith(u8, line, "User-agent:")) {
+            const value = std.mem.trim(u8, line["User-agent:".len..], " ");
+            match_agent = std.mem.eql(u8, value, "*") or std.mem.eql(u8, value, agent);
+        } else if (match_agent and std.mem.startsWith(u8, line, "Disallow:")) {
+            const rule = std.mem.trim(u8, line["Disallow:".len..], " ");
+            if (self.path.len >= rule.len and std.mem.startsWith(u8, self.path, rule)) {
+                allow = false;
+            }
+        } else if (line.len == 0) {
+            match_agent = false;
+        }
+    }
+
+    return allow;
+}
+
 pub fn parse(self: *Parser) !?Page {
+    const allowed = self.isAllowedByRobots() catch return null;
+    if (!allowed) {
+        std.debug.print("Blocked by robots.txt: {s}\n", .{self.path});
+        return null;
+    }
+
     var tcp = std.net.tcpConnectToHost(self.alloc, self.host, self.port) catch |err| switch (err) {
         error.InvalidIPAddressFormat => return null,
         else => return err,

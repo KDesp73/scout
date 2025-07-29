@@ -177,7 +177,7 @@ pub fn saveQueue(self: *Storage, queue: std.ArrayList([]u8)) !void {
     try self.db.exec("BEGIN TRANSACTION;", .{}, .{});
 
     const query =
-    \\INSERT INTO Queue(url) VALUES(?)
+    \\INSERT OR IGNORE INTO Queue(url) VALUES(?)
     ;
 
     var stmt = try self.db.prepare(query);
