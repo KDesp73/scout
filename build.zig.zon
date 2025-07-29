@@ -1,6 +1,6 @@
 .{
     .name = .scout,
-    .version = "0.0.1",
+    .version = "0.1.0",
     .minimum_zig_version = "0.14.1",
     .fingerprint = 0x176881647e85b273,
 
