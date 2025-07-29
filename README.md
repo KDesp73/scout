@@ -46,7 +46,6 @@ scout query --input "your search terms here"
 * Indexing of page titles, descriptions, and full content
 * Local full-text search via SQLite FTS5
 * CLI-first interface with easy commands
-* Extensible and written in Zig
 
 ## Requirements
 
