@@ -1,3 +1,19 @@
 TODO: check robots.txt
 TODO: check sitemap.xml
 TODO: logging to stdout
+TODO: cleaner error handling
+TODO: website (front page + results)
+TODO: relevance scoring boosts (bm25)
+TODO: snippets in results
+TODO: filters
+TODO: ranking heuristics
+TODO: crawl rate limiting
+TODO: content type filtering (text/html)
+TODO: track migrations
+TODO: content compression
+TODO: shell command
+TODO: config file
+TODO: logging to file
+TODO: statistics
+TODO: error reports
+TODO: serve command
