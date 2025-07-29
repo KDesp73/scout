@@ -3,13 +3,13 @@ const net = std.net;
 const Storage = @import("storage.zig");
 
 const INDEX_HTML = @embedFile("site/index.html");
+const RESULTS_HTML = @embedFile("site/results.html");
 
 fn handleConnection(conn: net.Server.Connection, storage: *Storage) !void {
     defer conn.stream.close();
 
     var buffer: [2048]u8 = undefined;
     const len = conn.stream.read(&buffer) catch return;
-
     const request = buffer[0..len];
 
     if (std.mem.startsWith(u8, request, "GET /search?query=")) {
@@ -19,23 +19,38 @@ fn handleConnection(conn: net.Server.Connection, storage: *Storage) !void {
 
         const query_end = std.mem.indexOfScalar(u8, request[query_start..], ' ') orelse request.len;
         const query_raw = request[query_start .. query_start + query_end];
-
         const query = std.mem.trim(u8, query_raw, "& ");
 
         const results = storage.search(query) catch return;
 
-        var writer = conn.stream.writer();
-        try writer.writeAll("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n");
+        var list_buf = std.ArrayList(u8).init(std.heap.page_allocator);
+        defer list_buf.deinit();
 
-        try writer.writeByte('[');
-        for (results, 0..) |res, i| {
-            if (i != 0) try writer.writeByte(',');
-            try writer.print("{{\"title\":\"{s}\",\"url\":\"{s}\"}}", .{ res.title, res.url });
+        for (results) |res| {
+            try list_buf.writer().print(
+                "<li><a href=\"{s}\">{s}</a></li>\n", .{res.url, res.title}
+            );
         }
-        try writer.writeByte(']');
+
+        const result_list = try list_buf.toOwnedSlice();
+        const html = try std.mem.replaceOwned(
+            u8,
+            std.heap.page_allocator,
+            RESULTS_HTML,
+            "{{results}}",
+            result_list
+        );
+
+        const writer = conn.stream.writer();
+        try writer.print(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            .{html.len}
+        );
+        try writer.writeAll(html);
         return;
     }
 
+    // default response — send index.html
     var writer = conn.stream.writer();
     try writer.print(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
