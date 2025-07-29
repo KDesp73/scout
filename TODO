@@ -1,5 +1,4 @@
 TODO: check sitemap.xml
-TODO: logging to stdout
 TODO: cleaner error handling
 TODO: website (front page + results)
 TODO: relevance scoring boosts (bm25)
@@ -17,3 +16,4 @@ TODO: error reports
 TODO: serve command
 DONE: content type filtering (text/html)
 DONE: check robots.txt
+DONE: logging to stdout

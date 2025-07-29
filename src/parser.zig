@@ -105,7 +105,7 @@ fn isAllowedByRobots(self: *Parser) !bool {
 pub fn parse(self: *Parser) !?Page {
     const allowed = self.isAllowedByRobots() catch return null;
     if (!allowed) {
-        std.debug.print("Blocked by robots.txt: {s}\n", .{self.path});
+        std.log.info("Blocked by robots.txt: {s}", .{self.path});
         return null;
     }
 

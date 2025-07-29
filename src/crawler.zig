@@ -93,7 +93,7 @@ pub fn crawl(self: *Crawler, max_pages: ?usize, sigint: *bool) !void {
         defer parser.deinit();
 
         const page = parser.parse() catch |err| {
-            std.debug.print("Failed to parse {s}: {}\n", .{url, err});
+            std.log.err("Failed to parse {s}: {}\n", .{url, err});
             self.alloc.free(url);
             continue;
         };
