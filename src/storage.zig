@@ -5,7 +5,7 @@ const Page = @import("parser.zig").Page;
 const Storage = @This();
 
 pub const DB_PATH = "data/scout.db";
-pub const SETUP_MIGRATION = @embedFile("scout.db.sql");
+pub const SETUP_MIGRATION = @embedFile("sql/scout.db.sql");
 
 db: sqlite.Db,
 alloc: std.mem.Allocator,

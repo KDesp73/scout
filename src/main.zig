@@ -3,6 +3,7 @@ const os = std.os;
 const Parser = @import("parser.zig");
 const Crawler = @import("crawler.zig");
 const Storage = @import("storage.zig");
+const server = @import("server.zig");
 const c = @cImport({
     @cInclude("signal.h");
 });
@@ -16,6 +17,8 @@ fn sigintHandler(_: c_int) callconv(.C) void {
 var config = struct {
     seed: ?[]const u8 = null,
     query: ?[]const u8 = null,
+    ip: ?[]const u8 = null,
+    port: u16 = 8080,
     depth: u8 = 20,
     count: usize = 2,
     infinite: bool = false,
@@ -147,6 +150,26 @@ fn parseArgs(allocator: std.mem.Allocator) cli.AppRunner.Error!cli.ExecFn {
                             }
                         }),
                         .target = .{ .action = .{ .exec = spawnCommand } }
+                    },
+
+                    cli.Command {
+                        .name = "serve",
+                        .description = .{ .one_line = "Serve a the site" },
+                        .options = try r.allocOptions(&.{
+                            .{
+                                .long_name = "ip",
+                                .help = "Specify the ip address",
+                                .value_ref = r.mkRef(&config.ip),
+                                .required = true
+                            },
+                            .{
+                                .long_name = "port",
+                                .help = "Specify the port",
+                                .value_ref = r.mkRef(&config.port),
+                                .required = true
+                            }
+                        }),
+                        .target = .{ .action = .{ .exec = serveCommand } }
                     }
                 }),
             },
@@ -262,4 +285,12 @@ pub fn queryCommand() !void {
 pub fn spawnCommand() !void {
     std.debug.print("Spawning {} crawlers...\n", .{config.count});
     try Crawler.spawnAndRun(config.count, &received_sigint);
+}
+
+pub fn serveCommand() !void {
+    var storage = try getStorage();
+    if(storage == null) return;
+    defer storage.?.deinit();
+
+    try server.serve(&storage.?, config.ip.?, config.port, &received_sigint);
 }
