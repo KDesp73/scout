@@ -1,15 +1,85 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Scout Search Engine</title>
+    <style>
+        body {
+            margin: 0;
+            height: 100svh;
+            display: grid;
+            place-items: center;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f9f9f9;
+        }
+
+        .container {
+            text-align: center;
+        }
+
+        h1 {
+            margin-bottom: 1rem;
+            color: #333;
+        }
+
+        form {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: center;
+        }
+
+        input[name="query"] {
+            padding: 0.5rem 1rem;
+            font-size: 1rem;
+            width: 300px;
+            max-width: 80vw;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        input[type="submit"] {
+            padding: 0.5rem 1rem;
+            font-size: 1rem;
+            background-color: #0077cc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        input[type="submit"]:hover {
+            background-color: #005fa3;
+        }
+
+        footer {
+            text-align: center;
+            padding: 1rem;
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: #0077cc;
+            text-decoration: none;
+            margin: 0 0.5rem;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
 </head>
 <body>
-    <h1>Search</h1>
-    <form action="/search">
-        <input name="query">
-        <input type="submit">
-    </form>
+    <div class="container">
+        <h1>Scout Search</h1>
+        <form action="/search" method="get">
+            <input type="text" name="query" placeholder="Enter your search..." required />
+            <input type="submit" value="Search" />
+        </form>
+    </div>
+    <footer>
+        <a href="https://github.com/KDesp73/scout" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <!-- <a href="/about">About</a> -->
+    </footer>
 </body>
 </html>

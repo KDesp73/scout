@@ -9,7 +9,7 @@ fn handleConnection(conn: net.Server.Connection, storage: *Storage) !void {
     defer conn.stream.close();
 
     var buffer: [2048]u8 = undefined;
-    const len = conn.stream.read(&buffer) catch return;
+    const len = try conn.stream.read(&buffer);
     const request = buffer[0..len];
 
     if (std.mem.startsWith(u8, request, "GET /search?query=")) {
@@ -17,36 +17,46 @@ fn handleConnection(conn: net.Server.Connection, storage: *Storage) !void {
         const query_pos = std.mem.indexOf(u8, request, query_marker) orelse return;
         const query_start = query_pos + query_marker.len;
 
-        const query_end = std.mem.indexOfScalar(u8, request[query_start..], ' ') orelse request.len;
+        const query_end_opt = std.mem.indexOfScalar(u8, request[query_start..], ' ');
+        const query_end = query_end_opt orelse request.len - query_start;
         const query_raw = request[query_start .. query_start + query_end];
         const query = std.mem.trim(u8, query_raw, "& ");
 
-        const results = storage.search(query) catch return;
+        const results = try storage.search(query);
 
         var list_buf = std.ArrayList(u8).init(std.heap.page_allocator);
         defer list_buf.deinit();
 
+        var lw = list_buf.writer();
         for (results) |res| {
-            try list_buf.writer().print(
+            try lw.print(
                 "<li><a href=\"{s}\">{s}</a></li>\n", .{res.url, res.title}
             );
         }
 
         const result_list = try list_buf.toOwnedSlice();
-        const html = try std.mem.replaceOwned(
+
+        var html = try std.mem.replaceOwned(
             u8,
             std.heap.page_allocator,
             RESULTS_HTML,
             "{{results}}",
             result_list
         );
+        std.heap.page_allocator.free(result_list);
 
-        const writer = conn.stream.writer();
+        const new_html = try std.mem.replaceOwned(u8, std.heap.page_allocator, html, "{{query}}", query);
+        std.heap.page_allocator.free(html);
+        html = new_html;
+
+        var writer = conn.stream.writer();
         try writer.print(
             "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             .{html.len}
         );
         try writer.writeAll(html);
+
+        std.heap.page_allocator.free(html);
         return;
     }
 

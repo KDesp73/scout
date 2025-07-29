@@ -1,14 +1,111 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Search Results</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{query}}</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8f9fa;
+            color: #222;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        header {
+            background-color: #0077cc;
+            padding: 1rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        header form {
+            width: 100%;
+            max-width: 600px;
+        }
+
+        header input[type="text"] {
+            width: 100%;
+            padding: 0.6rem 1rem;
+            font-size: 1rem;
+            border: none;
+            border-radius: 4px;
+        }
+
+        header input[type="text"]:focus {
+            outline: none;
+            box-shadow: 0 0 4px 2px #005fa3;
+        }
+
+        main {
+            flex: 1;
+            max-width: 700px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        h1 {
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #0077cc;
+            text-align: center;
+        }
+
+        ul.results {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        ul.results li {
+            background-color: white;
+            margin-bottom: 1rem;
+            padding: 1rem;
+            border-radius: 6px;
+            box-shadow: 0 1px 4px rgb(0 0 0 / 0.1);
+            transition: box-shadow 0.2s ease;
+        }
+
+        ul.results li:hover {
+            box-shadow: 0 4px 12px rgb(0 0 0 / 0.15);
+        }
+
+        ul.results li a {
+            text-decoration: none;
+            color: #0077cc;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        ul.results li p {
+            margin: 0.5rem 0 0;
+            color: #555;
+        }
+    </style>
 </head>
 <body>
-    <h1>Search Results</h1>
-    <ul>
-        {{results}}
-    </ul>
+    <header>
+        <form action="/search" method="get" role="search">
+            <input
+                type="text"
+                name="query"
+                value="{{query}}"
+                placeholder="Search Scout..."
+                aria-label="Search"
+                autocomplete="off"
+                required
+            />
+        </form>
+    </header>
+
+    <main>
+        <h2>Search Results for "{{query}}"</h2>
+        <ul class="results">
+            {{results}}
+        </ul>
+    </main>
 </body>
 </html>
