@@ -113,6 +113,13 @@ pub fn parse(self: *Parser) !?Page {
             const body_remainder = header_buf.items[body_start..];
             try self.body.appendSlice(body_remainder);
 
+            if (self.headers.get("Content-Type")) |tp| {
+                const type_lc = try std.ascii.allocLowerString(self.alloc, tp);
+                defer self.alloc.free(type_lc);
+
+                if (!std.mem.startsWith(u8, type_lc, "text/html")) return null;
+            }
+
             if (self.headers.get("Content-Length")) |len_str| {
                 const content_length = try std.fmt.parseInt(usize, len_str, 10);
                 var received = body_remainder.len;
