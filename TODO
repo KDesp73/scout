@@ -12,7 +12,7 @@ TODO: config file
 TODO: logging to file
 TODO: statistics
 TODO: error reports
-TODO: serve command
+DONE: serve command
 DONE: content type filtering (text/html)
 DONE: check robots.txt
 DONE: logging to stdout
