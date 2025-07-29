@@ -205,7 +205,6 @@ pub fn getQueue(self: *Storage) ![][]const u8 {
     return urls;
 }
 
-// TODO: put to query.zig maybe
 pub const PageResult = struct {
     title: []const u8,
     url: []const u8,
