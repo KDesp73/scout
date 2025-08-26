@@ -1,6 +1,8 @@
 const std = @import("std");
 const sqlite = @import("sqlite");
 const Page = @import("parser.zig").Page;
+const Logger = @import("logger.zig");
+const Context = @import("context.zig");
 
 const Storage = @This();
 
@@ -8,7 +10,7 @@ pub const DB_PATH = "data/scout.db";
 pub const SETUP_MIGRATION = @embedFile("sql/scout.db.sql");
 
 db: sqlite.Db,
-alloc: std.mem.Allocator,
+ctx: Context,
 
 const FileType = enum {
     not_found,
@@ -37,11 +39,11 @@ fn openDatabase(path: [:0]const u8) !sqlite.Db {
 }
 
 // https://sqlite.org/loadext.html#build
-fn enableExtensions(db: *sqlite.Db) !void {
+fn enableExtensions(db: *sqlite.Db, logger: *Logger) !void {
     const c = sqlite.c;
 
     if (c.sqlite3_enable_load_extension(db.db, 1) != c.SQLITE_OK) {
-        std.log.err("Could not enable loading extensions", .{});
+        try logger.ERRO("Could not enable loading extensions", .{});
         return error.SQLiteError;
     }
 
@@ -50,37 +52,51 @@ fn enableExtensions(db: *sqlite.Db) !void {
 
     if (rc != c.SQLITE_OK) {
         if (err_msg != null) {
-            std.log.err("Failed to load extension: {s}", .{err_msg.?.*});
+            try logger.ERRO("Failed to load extension: {s}", .{err_msg.?.*});
         }
         return error.SQLiteError;
     }
 }
 
-pub fn runMigration(dbPath: [:0]const u8, migration: []const u8) !void {
+pub fn runMigration(logger: *Logger, dbPath: [:0]const u8, migration: []const u8) !void {
     var db = try openDatabase(dbPath);
-    try enableExtensions(&db);
+    try enableExtensions(&db, @constCast(logger));
 
     var diags = sqlite.Diagnostics{};
     db.execMulti(migration, .{ .diags = &diags }) catch {};
 }
 
-pub fn init(alloc: std.mem.Allocator) !Storage {
+pub fn init(ctx: Context) !Storage {
     if (pathExists(Storage.DB_PATH) != .file) {
         return error.InitializationNeeded;
     }
 
     const self = Storage {
-        .alloc = alloc,
+        .ctx = ctx,
         .db = try openDatabase(DB_PATH)
     };
 
-    try enableExtensions(@constCast(&self.db));
+    try enableExtensions(@constCast(&self.db), @constCast(&ctx.logger));
 
     return self;
 }
 
 pub fn deinit(self: *Storage) void {
     self.db.deinit();
+}
+
+pub fn removePage(self: *Storage, url: []const u8) !void {
+    var logger = self.ctx.logger;
+    const delete_fts_query = "DELETE FROM PageIndex WHERE url = ?;";
+    var diags = sqlite.Diagnostics{};
+    var delete_fts_stmt = self.db.prepareWithDiags(delete_fts_query, .{ .diags = &diags }) catch |err| {
+        try logger.ERRO("unable to prepare statement, got error {}. diagnostics: {s}", .{ err, diags });
+        return err;
+    };
+    defer delete_fts_stmt.deinit();
+
+    try delete_fts_stmt.exec(.{}, .{url});
+    try self.removeFromQueue(url);
 }
 
 pub fn store(self: *Storage, page: Page) !void {
@@ -118,23 +134,17 @@ pub fn store(self: *Storage, page: Page) !void {
         page.url,
     });
 
-    const delete_fts_query = "DELETE FROM PageIndex WHERE url = ?;";
-    var diags = sqlite.Diagnostics{};
-    var delete_fts_stmt = self.db.prepareWithDiags(delete_fts_query, .{ .diags = &diags }) catch |err| {
-        std.log.err("unable to prepare statement, got error {}. diagnostics: {s}", .{ err, diags });
-        return err;
-    };
-    defer delete_fts_stmt.deinit();
-
-    try delete_fts_stmt.exec(.{}, .{page.url});
+    try self.removePage(page.url);
 
     const insert_fts_query =
     \\INSERT INTO PageIndex(title, description, keywords, content, url)
     \\VALUES (?, ?, ?, ?, ?);
     ;
 
+    var logger = self.ctx.logger;
+    var diags = sqlite.Diagnostics{};
     var insert_fts_stmt = self.db.prepareWithDiags(insert_fts_query, .{ .diags = &diags }) catch |err| {
-        std.log.err("unable to prepare statement, got error {}. diagnostics: {s}", .{ err, diags });
+        try logger.ERRO("unable to prepare statement, got error {}. diagnostics: {s}", .{ err, diags });
         return err;
     };
     defer insert_fts_stmt.deinit();
@@ -158,8 +168,19 @@ pub fn getVisited(self:* Storage) ![][]const u8 {
     var stmt = try self.db.prepare(query);
     defer stmt.deinit();
 
-    const urls = try stmt.all([]const u8, self.alloc, .{}, .{});
+    const urls = try stmt.all([]const u8, self.ctx.alloc, .{}, .{});
     return urls;
+}
+
+pub fn removeFromQueue(self: *Storage, url: []const u8) !void {
+    const query =
+    \\DELETE FROM Queue WHERE url = ?
+    ;
+
+    var stmt = try self.db.prepare(query);
+    defer stmt.deinit();
+
+    try stmt.exec(.{}, .{.url = url});
 }
 
 pub fn emptyQueue(self: *Storage) !void {
@@ -183,9 +204,10 @@ pub fn saveQueue(self: *Storage, queue: std.ArrayList([]u8)) !void {
     var stmt = try self.db.prepare(query);
     defer stmt.deinit();
 
+    var logger = self.ctx.logger;
     for (queue.items) |url| {
         stmt.exec(.{}, .{ .url = url }) catch |err| {
-            std.log.err("{}", .{err});
+            try logger.ERRO("{}", .{err});
         };
         stmt.reset();
     }
@@ -201,7 +223,7 @@ pub fn getQueue(self: *Storage) ![][]const u8 {
     var stmt = try self.db.prepare(query);
     defer stmt.deinit();
 
-    const urls = try stmt.all([]const u8, self.alloc, .{}, .{});
+    const urls = try stmt.all([]const u8, self.ctx.alloc, .{}, .{});
     return urls;
 }
 
@@ -223,9 +245,9 @@ pub fn search(self: *Storage, term: []const u8) ![]PageResult {
     const rows = try stmt.all(struct {
         title: []const u8,
         url: []const u8,
-    }, self.alloc, .{}, .{ .query = term });
+    }, self.ctx.alloc, .{}, .{ .query = term });
 
-    var results = try self.alloc.alloc(PageResult, rows.len);
+    var results = try self.ctx.alloc.alloc(PageResult, rows.len);
     for (rows, 0..) |row, i| {
         results[i] = .{
             .title = row.title,

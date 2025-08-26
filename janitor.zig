@@ -15,7 +15,7 @@ pub const Step = enum {
     help,
 };
 
-const version = "0.1.1";
+const version = "0.1.2";
 
 /// The main build object passed into `build.zig`.
 b: *std.Build,

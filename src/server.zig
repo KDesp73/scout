@@ -1,6 +1,7 @@
 const std = @import("std");
 const net = std.net;
 const Storage = @import("storage.zig");
+const Logger = @import("logger.zig");
 
 const INDEX_HTML = @embedFile("site/index.html");
 const RESULTS_HTML = @embedFile("site/results.html");
@@ -77,16 +78,17 @@ pub fn serve(storage: *Storage, ip: []const u8, port: u16, sigint: *bool) !void 
     });
     defer server.deinit();
 
-    std.log.info("Listening on http://{s}:{}...", .{ ip, port });
+    var logger = Logger.init(storage.ctx.alloc, .INFO, std.io.getStdOut(), false);
+    try logger.INFO("Listening on http://{s}:{}...", .{ ip, port });
 
     while (!sigint.*) {
         const conn = server.accept() catch |err| {
-            std.log.err("Failed to accept connection: {}", .{err});
+            try logger.ERRO("Failed to accept connection: {}", .{err});
             continue;
         };
 
         const thread = std.Thread.spawn(.{}, handleConnection, .{ conn, storage }) catch |err| {
-            std.log.err("Failed to spawn thread: {}", .{err});
+            try logger.ERRO("Failed to spawn thread: {}", .{err});
             conn.stream.close();
             continue;
         };
@@ -94,5 +96,5 @@ pub fn serve(storage: *Storage, ip: []const u8, port: u16, sigint: *bool) !void 
         thread.detach();
     }
 
-    std.log.info("Server shutting down...", .{});
+    try logger.INFO("Server shutting down...", .{});
 }

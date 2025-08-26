@@ -2,35 +2,37 @@ const std = @import("std");
 const Parser = @import("parser.zig");
 const Page = Parser.Page;
 const Storage = @import("storage.zig");
+const Logger = @import("logger.zig");
+const Context = @import("context.zig");
 
 const Crawler = @This();
 
-alloc: std.mem.Allocator,
 visited: std.StringHashMap(void),
 queue: std.ArrayList([]u8),
+ctx: Context,
 
 const MAX_QUEUE_SIZE = 10_000;
 
-pub fn init(alloc: std.mem.Allocator) Crawler {
+pub fn init(ctx: Context) Crawler {
     return Crawler{
-        .alloc = alloc,
-        .visited = std.StringHashMap(void).init(alloc),
-        .queue = std.ArrayList([]u8).init(alloc),
+        .ctx = ctx,
+        .visited = std.StringHashMap(void).init(ctx.alloc),
+        .queue = std.ArrayList([]u8).init(ctx.alloc),
     };
 }
 
 pub fn deinit(self: *Crawler) void {
     var it = self.visited.iterator();
-    while (it.next()) |entry| self.alloc.free(entry.key_ptr.*);
+    while (it.next()) |entry| self.ctx.alloc.free(entry.key_ptr.*);
     self.visited.deinit();
 
-    for (self.queue.items) |url| self.alloc.free(url);
+    for (self.queue.items) |url| self.ctx.alloc.free(url);
     self.queue.deinit();
 }
 
 pub fn appendQ(self: *Crawler, url: []const u8) !void {
     if(self.visited.contains(url)) return;
-    const normalized = try normalizeUrl("https://", url, self.alloc);
+    const normalized = try normalizeUrl("https://", url, self.ctx.alloc);
     try self.queue.append(normalized);
 }
 
@@ -53,15 +55,20 @@ pub fn loadVisited(self: *Crawler, storage: *Storage) !void {
 
 pub fn loadQueue(self: *Crawler, storage: *Storage) !void {
     const urls = try storage.getQueue();
-    for (urls) |u| {
+    std.debug.print("Loading", .{});
+    for (urls, 0..) |u, i| {
+        if(i % 1000 == 0) 
+            std.debug.print(".", .{});
         try self.appendQ(u);
     }
+    std.debug.print("\n", .{});
 }
 
 pub fn crawl(self: *Crawler, max_pages: ?usize, sigint: *bool) !void {
     var crawled: usize = 0;
 
-    var storage = try Storage.init(self.alloc);
+    var logger = self.ctx.logger;
+    var storage = try Storage.init(self.ctx);
     defer storage.deinit();
 
     while ((max_pages == null) or (self.queue.items.len > 0 and crawled < max_pages.?)) {
@@ -71,14 +78,16 @@ pub fn crawl(self: *Crawler, max_pages: ?usize, sigint: *bool) !void {
         }
 
         const url = self.queue.orderedRemove(0);
+        defer self.ctx.alloc.free(url);
 
         if (self.visited.contains(url)) {
-            self.alloc.free(url);
+            try logger.INFO("{s} already visited", .{url});
+            self.ctx.alloc.free(url);
             continue;
         }
 
-        try self.visited.put(try self.alloc.dupe(u8, url), {});
-        std.debug.print("Crawling: {s}\n", .{url});
+        try self.visited.put(try self.ctx.alloc.dupe(u8, url), {});
+        try logger.INFO("Crawling: {s}", .{url});
 
         const without_scheme = url["https://".len..];
         const slash_index = std.mem.indexOfScalar(u8, without_scheme, '/') orelse without_scheme.len;
@@ -88,41 +97,42 @@ pub fn crawl(self: *Crawler, max_pages: ?usize, sigint: *bool) !void {
         else
             "/";
 
-        var parser = Parser.init(self.alloc, host, 443);
+        var parser = Parser.init(self.ctx, host, 443);
         parser.path = path;
         defer parser.deinit();
 
         const page = parser.parse() catch |err| {
-            std.log.err("Failed to parse {s}: {}\n", .{url, err});
-            self.alloc.free(url);
+            try logger.ERRO("Failed to parse {s}: {}\n", .{url, err});
+            try storage.removePage(url);
             continue;
         };
 
-        for (page.?.links) |link| {
-            const normalized = normalizeUrl(host, link, self.alloc) catch continue;
+        for (page.links) |link| {
+            const normalized = normalizeUrl(host, link, self.ctx.alloc) catch continue;
             if (!self.visited.contains(normalized)) {
                 try self.queue.append(normalized);
             } else {
-                self.alloc.free(normalized);
+                self.ctx.alloc.free(normalized);
             }
         }
 
-        Parser.printPage(page.?);
-        try storage.store(page.?);
+        Parser.printPage(page);
+        storage.store(page) catch |err| {
+            try logger.ERRO("Could not store page: {}", .{err});
+            continue;
+        };
 
-        self.alloc.free(url);
         crawled += 1;
     }
-    
 }
 
-pub fn crawlOne(self: *Crawler, url: []const u8) !?Page {
-    if (self.visited.contains(url)) {
-        return null;
-    }
+pub fn crawlOne(self: *Crawler, url: []const u8) !Page {
+    if (self.visited.contains(url)) return error.AlreadyVisitedPage;
 
-    try self.visited.put(try self.alloc.dupe(u8, url), {});
-    std.debug.print("Crawling: {s}\n", .{url});
+    var logger = self.ctx.logger;
+
+    try self.visited.put(try self.ctx.alloc.dupe(u8, url), {});
+    try logger.INFO("Crawling: {s}", .{url});
 
     const without_scheme = url["https://".len..];
     const slash_index = std.mem.indexOfScalar(u8, without_scheme, '/') orelse without_scheme.len;
@@ -132,22 +142,22 @@ pub fn crawlOne(self: *Crawler, url: []const u8) !?Page {
     else
         "/";
 
-    var parser = Parser.init(self.alloc, host, 443);
+    var parser = Parser.init(self.ctx, host, 443);
     parser.path = path;
     defer parser.deinit();
 
     const page = try parser.parse();
 
-    for (page.?.links) |link| {
-        const normalized = normalizeUrl(host, link, self.alloc) catch continue;
+    for (page.links) |link| {
+        const normalized = normalizeUrl(host, link, self.ctx.alloc) catch continue;
         if (!self.visited.contains(normalized)) {
             try self.queue.append(normalized);
         } else {
-            self.alloc.free(normalized);
+            self.ctx.alloc.free(normalized);
         }
     }
 
-    Parser.printPage(page.?);
+    Parser.printPage(page);
     return page;
 }
 
@@ -158,17 +168,17 @@ const Queue = struct {
 
 const WorkerArgs = struct {
     id: usize,
-    storage: *Storage,
     queue: *Queue,
     depth: usize = 0, // unused but might be useful
-    allocator: std.mem.Allocator,
     sigint: *bool,
+    ctx: Context,
+    storage: *Storage,
 };
 
-pub fn spawnAndRun(worker_count: usize, received_sigint: *bool) !void {
-    const allocator = std.heap.page_allocator;
-
-    var storage = try Storage.init(allocator);
+pub fn spawnAndRun(ctx: Context, worker_count: usize, received_sigint: *bool) !void {
+    const allocator = ctx.alloc;
+    var logger = ctx.logger;
+    var storage = try Storage.init(ctx);
     defer storage.deinit();
 
     const initial_urls = try storage.getQueue();
@@ -197,9 +207,9 @@ pub fn spawnAndRun(worker_count: usize, received_sigint: *bool) !void {
             WorkerArgs{
                 .id = i,
                 .queue = q,
-                .storage = &storage,
-                .allocator = allocator,
                 .sigint = received_sigint,
+                .ctx = ctx,
+                .storage = &storage,
             },
         });
     }
@@ -208,7 +218,7 @@ pub fn spawnAndRun(worker_count: usize, received_sigint: *bool) !void {
 
     try storage.emptyQueue();
     for (queues, 0..) |q, i| {
-        std.log.info("Saving queue #{}...", .{i});
+        try logger.INFO("Saving queue #{}...", .{i});
         try storage.saveQueue(q.list.*);
     }
 }
@@ -225,8 +235,8 @@ fn splitQueue(urls: [][]const u8, parts: usize, allocator: std.mem.Allocator) ![
 }
 
 fn worker(args: WorkerArgs) void {
-    const allocator = args.allocator;
-    var crawler = Crawler.init(allocator);
+    const ctx = args.ctx;
+    var crawler = Crawler.init(ctx);
     defer crawler.deinit();
 
     const queue = args.queue;
@@ -239,27 +249,25 @@ fn worker(args: WorkerArgs) void {
         queue.mutex.unlock();
 
         if (crawler.visited.contains(url)) {
-            allocator.free(url);
+            ctx.alloc.free(url);
             continue;
         }
 
         const page = crawler.crawlOne(url) catch {
-            allocator.free(url);
+            ctx.alloc.free(url);
             continue;
         };
 
-        if (page) |p| {
-            storage.store(p) catch continue;
+        storage.store(page) catch continue;
 
-            for (crawler.queue.items) |found| {
-                queue.mutex.lock();
-                queue.list.append(found) catch {};
-                queue.mutex.unlock();
-            }
-            crawler.queue.clearRetainingCapacity();
+        for (crawler.queue.items) |found| {
+            queue.mutex.lock();
+            queue.list.append(found) catch {};
+            queue.mutex.unlock();
         }
+        crawler.queue.clearRetainingCapacity();
 
-        allocator.free(url);
+        ctx.alloc.free(url);
     }
 }
 

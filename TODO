@@ -13,6 +13,8 @@ TODO: logging to file
 TODO: statistics
 TODO: error reports
 TODO: serve command
+TODO: templating system
+TODO: remove #'s from urls
 DONE: content type filtering (text/html)
 DONE: check robots.txt
 DONE: logging to stdout

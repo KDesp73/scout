@@ -1,15 +1,16 @@
 const std = @import("std");
-const Parser = @This();
+const Context = @import("context.zig");
 
+const Parser = @This();
 const agent = "search/0.0.1";
 
 host: []const u8,
 port: u16,
 path: []const u8 = "/",
-alloc: std.mem.Allocator,
 headers: std.StringHashMap([]u8),
 body: std.ArrayList(u8),
 links: std.ArrayList([]u8),
+ctx: Context,
 
 pub const Page = struct {
     url: []const u8,
@@ -29,56 +30,73 @@ pub fn printPage(page: Page) void {
     for (page.links) |link| {
         std.debug.print("    {s}\n", .{link});
     }
+    // std.debug.print("  Content: {s}\n", .{page.content});
 }
 
-pub fn init(alloc: std.mem.Allocator, host: []const u8, port: u16) Parser {
+pub fn init(ctx: Context, host: []const u8, port: u16) Parser {
     return Parser{
         .host = host,
         .port = port,
         .path = "/",
-        .alloc = alloc,
-        .headers = std.StringHashMap([]u8).init(alloc),
-        .body = std.ArrayList(u8).init(alloc),
-        .links = std.ArrayList([]u8).init(alloc),
+        .ctx = ctx,
+        .headers = std.StringHashMap([]u8).init(ctx.alloc),
+        .body = std.ArrayList(u8).init(ctx.alloc),
+        .links = std.ArrayList([]u8).init(ctx.alloc),
     };
 }
 
 pub fn deinit(self: *Parser) void {
     var it = self.headers.iterator();
     while (it.next()) |entry| {
-        self.alloc.free(entry.key_ptr.*);
-        self.alloc.free(entry.value_ptr.*);
+        self.ctx.alloc.free(entry.key_ptr.*);
+        self.ctx.alloc.free(entry.value_ptr.*);
     }
     self.headers.deinit();
     self.body.deinit();
 
-    for (self.links.items) |link| self.alloc.free(link);
+    for (self.links.items) |link| self.ctx.alloc.free(link);
     self.links.deinit();
 }
 
 fn isAllowedByRobots(self: *Parser) !bool {
-    var client = try std.net.tcpConnectToHost(self.alloc, self.host, self.port);
-    defer client.close();
 
-    var tls = try std.crypto.tls.Client.init(client, .{
+    var tcp = try std.net.tcpConnectToHost(self.ctx.alloc, self.host, self.port);
+    defer tcp.close();
+
+    const tls_config = std.crypto.tls.Client.Options{
         .ca = .no_verification,
         .host = .no_verification,
-    });
+    };
 
-    const request = try std.fmt.allocPrint(self.alloc,
+    var tls_client = try std.crypto.tls.Client.init(tcp, tls_config);
+
+    const request = try std.fmt.allocPrint(self.ctx.alloc,
         \\GET /robots.txt HTTP/1.1\r\n
         \\Host: {s}\r\n
         \\User-Agent: {s}\r\n
         \\Connection: close\r\n
         \\Accept: */*\r\n\r\n
     , .{ self.host, agent });
+    defer self.ctx.alloc.free(request);
 
-    try tls.writeAll(client, request);
+    try tls_client.writeAll(tcp, request);
 
-    var buf: [4096]u8 = undefined;
-    const n = try tls.readAll(client, &buf);
-    const response = buf[0..n];
+    var buffer = std.ArrayList(u8).init(self.ctx.alloc);
+    defer buffer.deinit();
 
+    while (true) {
+        var chunk: [512]u8 = undefined;
+        const n = tls_client.read(tcp, &chunk) catch |err| switch (err) {
+            error.TlsConnectionTruncated => 0,
+            else => return err,
+        };
+        if (n == 0) break;
+        try buffer.appendSlice(chunk[0..n]);
+    }
+
+    const response = try buffer.toOwnedSlice();
+
+    // If robots.txt not found, allow crawling
     if (!std.mem.containsAtLeast(u8, response, 1, "200 OK")) return true;
 
     var lines = std.mem.tokenizeAny(u8, response, "\r\n");
@@ -102,17 +120,15 @@ fn isAllowedByRobots(self: *Parser) !bool {
     return allow;
 }
 
-pub fn parse(self: *Parser) !?Page {
-    const allowed = self.isAllowedByRobots() catch return null;
-    if (!allowed) {
-        std.log.info("Blocked by robots.txt: {s}", .{self.path});
-        return null;
-    }
+pub fn parse(self: *Parser) !Page {
+    // FIXME: isAllowedByRobots hangs when reading response
+    // const allowed = try self.isAllowedByRobots();
+    // if (!allowed) {
+    //     Logger.INFO("Blocked by robots.txt: {s}", .{self.path});
+    //     return error.DisallowedByRobotsTxt;
+    // }
 
-    var tcp = std.net.tcpConnectToHost(self.alloc, self.host, self.port) catch |err| switch (err) {
-        error.InvalidIPAddressFormat => return null,
-        else => return err,
-    };
+    var tcp = try std.net.tcpConnectToHost(self.ctx.alloc, self.host, self.port);
     defer tcp.close();
 
     const tls_config = std.crypto.tls.Client.Options{
@@ -132,7 +148,7 @@ pub fn parse(self: *Parser) !?Page {
     const request = try std.fmt.bufPrint(&request_buf, request_fmt, .{self.path, self.host});
     try tls_client.writeAll(tcp, request);
 
-    var header_buf = std.ArrayList(u8).init(self.alloc);
+    var header_buf = std.ArrayList(u8).init(self.ctx.alloc);
     defer header_buf.deinit();
 
     const end_seq = "\r\n\r\n";
@@ -155,8 +171,8 @@ pub fn parse(self: *Parser) !?Page {
                 if (std.mem.indexOfScalar(u8, line, ':')) |colon| {
                     const key = std.mem.trim(u8, line[0..colon], " ");
                     const value = std.mem.trim(u8, line[colon + 1..], " ");
-                    const key_owned = try self.alloc.dupe(u8, key);
-                    const value_owned = try self.alloc.dupe(u8, value);
+                    const key_owned = try self.ctx.alloc.dupe(u8, key);
+                    const value_owned = try self.ctx.alloc.dupe(u8, value);
                     try self.headers.put(key_owned, value_owned);
                 }
             }
@@ -166,14 +182,15 @@ pub fn parse(self: *Parser) !?Page {
             try self.body.appendSlice(body_remainder);
 
             if (self.headers.get("Content-Type")) |tp| {
-                const type_lc = try std.ascii.allocLowerString(self.alloc, tp);
-                defer self.alloc.free(type_lc);
+                const type_lc = try std.ascii.allocLowerString(self.ctx.alloc, tp);
+                defer self.ctx.alloc.free(type_lc);
 
-                if (!std.mem.startsWith(u8, type_lc, "text/html")) return null;
+                if (!std.mem.startsWith(u8, type_lc, "text/html")) return error.InvalidContentType;
             }
 
             if (self.headers.get("Content-Length")) |len_str| {
                 const content_length = try std.fmt.parseInt(usize, len_str, 10);
+                if(content_length == 0) break;
                 var received = body_remainder.len;
 
                 while (received < content_length) {
@@ -201,7 +218,7 @@ pub fn parse(self: *Parser) !?Page {
         }
     }
 
-    for (self.links.items) |link| self.alloc.free(link);
+    for (self.links.items) |link| self.ctx.alloc.free(link);
     self.links.deinit();
     self.links = try self.extractLinks();
 
@@ -210,18 +227,20 @@ pub fn parse(self: *Parser) !?Page {
     }
 
     const links_slice = try self.links.toOwnedSlice();
-    var page_links = std.ArrayList([]u8).init(self.alloc);
+    var page_links = std.ArrayList([]u8).init(self.ctx.alloc);
 
     defer page_links.deinit();
 
     for (links_slice) |link| {
-        const copy = try self.alloc.dupe(u8, link);
+        const copy = try self.ctx.alloc.dupe(u8, link);
         try page_links.append(copy);
     }
 
+    const title = try self.extractTitle();
+    if(title.len == 0) return error.MissingTitle; // Do not accept pages without a title
     return Page{
-        .url = try std.fmt.allocPrint(self.alloc, "https://{s}{s}", .{self.host, self.path}),
-        .title = try self.extractTitle(),
+        .url = try std.fmt.allocPrint(self.ctx.alloc, "https://{s}{s}", .{self.host, self.path}),
+        .title = title,
         .keywords = try self.extractMeta("keywords"),
         .description = try self.extractMeta("description"),
         .content = try self.stripBody(),
@@ -244,7 +263,7 @@ fn stripBody(self: *Parser) ![]const u8 {
 
     const inner = self.body.items[content_start..end_pos];
 
-    const alloc = self.alloc;
+    const alloc = self.ctx.alloc;
     var text = std.ArrayList(u8).init(alloc);
     var i: usize = 0;
     var inside_tag = false;
@@ -343,22 +362,22 @@ fn extractTitle(self: *Parser) ![]const u8 {
     const title_start = start + start_tag.len;
     if (title_start >= end) return "";
 
-    return try self.alloc.dupe(u8, self.body.items[title_start..end]);
+    return try self.ctx.alloc.dupe(u8, self.body.items[title_start..end]);
 }
 
 fn extractMeta(self: *Parser, name: []const u8) ![]const u8 {
-    const pattern = try std.fmt.allocPrint(self.alloc, "<meta name=\"{s}\" content=\"", .{name});
-    defer self.alloc.free(pattern);
+    const pattern = try std.fmt.allocPrint(self.ctx.alloc, "<meta name=\"{s}\" content=\"", .{name});
+    defer self.ctx.alloc.free(pattern);
 
     const start = std.mem.indexOf(u8, self.body.items, pattern) orelse return "";
     const after = self.body.items[start + pattern.len..];
 
     const end_quote = std.mem.indexOfScalar(u8, after, '"') orelse return "";
-    return try self.alloc.dupe(u8, after[0..end_quote]);
+    return try self.ctx.alloc.dupe(u8, after[0..end_quote]);
 }
 
 fn extractLinks(self: *Parser) !std.ArrayList([]u8) {
-    var links = std.ArrayList([]u8).init(self.alloc);
+    var links = std.ArrayList([]u8).init(self.ctx.alloc);
 
     const pattern = "href=\"";
     var i: usize = 0;
@@ -383,7 +402,7 @@ fn extractLinks(self: *Parser) !std.ArrayList([]u8) {
             continue;
         }
 
-        const url_copy = try self.alloc.dupe(u8, url);
+        const url_copy = try self.ctx.alloc.dupe(u8, url);
         try links.append(url_copy);
 
         i += quote_pos.? + 1;

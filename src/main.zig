@@ -8,6 +8,8 @@ const c = @cImport({
     @cInclude("signal.h");
 });
 const cli = @import("cli");
+const Logger = @import("logger.zig");
+const Context = @import("context.zig");
 
 var received_sigint = false;
 fn sigintHandler(_: c_int) callconv(.C) void {
@@ -28,6 +30,7 @@ var config = struct {
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const alloc = gpa.allocator();
+var logger: ?Logger = null;
 
 fn parseArgs(allocator: std.mem.Allocator) cli.AppRunner.Error!cli.ExecFn {
     var r = try cli.AppRunner.init(allocator);
@@ -183,7 +186,7 @@ fn parseArgs(allocator: std.mem.Allocator) cli.AppRunner.Error!cli.ExecFn {
 
 pub fn main() anyerror!void {
     _ = c.signal(c.SIGINT, sigintHandler);
-
+    logger = Logger.init(alloc, .INFO, std.io.getStdOut(), true);
     const action = try parseArgs(alloc);
 
     const r = action();
@@ -195,9 +198,10 @@ pub fn main() anyerror!void {
 }
 
 fn getStorage() !?Storage {
-    return Storage.init(alloc) catch |err| switch (err) {
+    const ctx = Context.init(alloc, logger.?);
+    return Storage.init(ctx) catch |err| switch (err) {
         error.InitializationNeeded => {
-            std.log.err("Database not found. Run `scout init`.", .{});
+            try logger.?.ERRO("Database not found. Run `scout init`.", .{});
             return null;
         },
         else => return err,
@@ -205,15 +209,17 @@ fn getStorage() !?Storage {
 }
 
 pub fn initCommand() !void {
-    try Storage.runMigration(Storage.DB_PATH, Storage.SETUP_MIGRATION);
+    try Storage.runMigration(&logger.?, Storage.DB_PATH, Storage.SETUP_MIGRATION);
 }
 
 pub fn crawlCommand() !void {
+    const ctx = Context.init(alloc, logger.?);
+    
     var storage = try getStorage();
     if(storage == null) return;
     defer storage.?.deinit();
 
-    var crawler = Crawler.init(alloc);
+    var crawler = Crawler.init(ctx);
     defer crawler.deinit();
 
     try crawler.loadVisited(&storage.?);
@@ -227,27 +233,32 @@ pub fn crawlCommand() !void {
             std.log.warn("Nothing in queue. Please provide a seed host", .{});
             return;
         } else {
-            std.log.info("Loaded {} urls from queue", .{loaded});
+            try logger.?.INFO("Loaded {} urls from queue", .{loaded});
         }
     }
 
     try crawler.crawl(if(config.infinite) null else config.depth, &received_sigint);// catch |err| {
-    //     std.log.err("{}", .{err});
+    //     try logger.?.ERRO("{}", .{err});
     // };
 
-    std.log.info("Saving queue...", .{});
+    try logger.?.INFO("Saving queue...", .{});
     if(config.seed == null) try storage.?.emptyQueue();
     try storage.?.saveQueue(crawler.queue);
 }
 
 pub fn parseCommand() !void {
-    var parser = Parser.init(alloc, config.seed.?, 443);
+    const ctx = Context.init(alloc, logger.?);
+
+    var parser = Parser.init(ctx, config.seed.?, 443);
     defer parser.deinit();
-    const page = try parser.parse();
+    const page = parser.parse() catch |err| {
+        try logger.?.ERRO("Failed parsing {s}: {}", .{config.seed.?, err});
+        return;
+    };
 
     parser.printHeaders();
     std.debug.print("\n", .{});
-    Parser.printPage(page.?);
+    Parser.printPage(page);
     std.debug.print("\n", .{});
 }
 
@@ -259,15 +270,15 @@ pub fn listCommand() !void {
     if(config.pages) {
         const pages = try storage.?.getVisited();
         for (pages) |url| {
-            std.debug.print("{s}\n", .{url});
+            try Logger.printfln("{s}", .{url});
         }
     } else if(config.queue) {
         const queue = try storage.?.getQueue();
         for(queue) |url| {
-            std.debug.print("{s}\n", .{url});
+            try Logger.printfln("{s}", .{url});
         }
     } else {
-        std.log.err("Use --pages or --queue", .{});
+        try logger.?.ERRO("Use --pages or --queue", .{});
     }
 }
 
@@ -278,13 +289,15 @@ pub fn queryCommand() !void {
 
     const results = try storage.?.search(config.query.?);
     for (results) |page| {
-        std.debug.print("{s} ({s})\n\n", .{page.title, page.url});
+        try Logger.printfln("{s} ({s})\n", .{page.title, page.url});
     }
 }
 
 pub fn spawnCommand() !void {
     std.debug.print("Spawning {} crawlers...\n", .{config.count});
-    try Crawler.spawnAndRun(config.count, &received_sigint);
+    const ctx = Context.init(alloc, logger.?);
+
+    try Crawler.spawnAndRun(ctx, config.count, &received_sigint);
 }
 
 pub fn serveCommand() !void {
