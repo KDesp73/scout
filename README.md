@@ -38,6 +38,13 @@ scout crawl --seed "wikipedia.org" --infinite
 scout query --input "your search terms here"
 ```
 
+### 6. Serve a website version of the search engine
+
+```bash
+scout serve --ip 127.0.0.1 --port 8080
+```
+
+
 ---
 
 ## Features

@@ -12,9 +12,13 @@ TODO: config file
 TODO: logging to file
 TODO: statistics
 TODO: error reports
+<<<<<<< HEAD
 TODO: serve command
 TODO: templating system
 TODO: remove #'s from urls
+=======
+DONE: serve command
+>>>>>>> 021b474c041d8d4999b70871da4321f202f6795c
 DONE: content type filtering (text/html)
 DONE: check robots.txt
 DONE: logging to stdout
