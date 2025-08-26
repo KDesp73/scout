@@ -102,7 +102,7 @@ pub fn crawl(self: *Crawler, max_pages: ?usize, sigint: *bool) !void {
         defer parser.deinit();
 
         const page = parser.parse() catch |err| {
-            try logger.ERRO("Failed to parse {s}: {}\n", .{url, err});
+            try logger.ERRO("Failed to parse {s}: {}", .{url, err});
             try storage.removePage(url);
             continue;
         };

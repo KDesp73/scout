@@ -26,7 +26,7 @@ pub fn init(alloc: std.mem.Allocator, lvl: Level, fdout: std.fs.File, log2file: 
     if (log2file) {
         var buf: [128]u8 = undefined;
         const ts = std.time.timestamp();
-        const name = std.fmt.bufPrint(&buf, "log-{d}.txt", .{ts}) catch {
+        const name = std.fmt.bufPrint(&buf, "logs/log-{d}.txt", .{ts}) catch {
             std.log.err("Could not initialize outfile name", .{});
             return logger;
         };
