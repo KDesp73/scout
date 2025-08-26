@@ -177,7 +177,7 @@ fn parseArgs(allocator: std.mem.Allocator) cli.AppRunner.Error!cli.ExecFn {
                 }),
             },
         },
-        .version = "0.3.0",
+        .version = "0.4.0",
         .author = "KDesp73",
     };
 
