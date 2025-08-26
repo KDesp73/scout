@@ -294,6 +294,7 @@ pub fn queryCommand() !void {
 }
 
 pub fn spawnCommand() !void {
+    logger.?.TODO("spawning multiple crawlers has sql issues", .{});
     std.debug.print("Spawning {} crawlers...\n", .{config.count});
     const ctx = Context.init(alloc, logger.?);
 

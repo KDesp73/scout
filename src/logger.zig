@@ -94,7 +94,7 @@ pub fn ERRO(self: *Logger, comptime fmt: []const u8, args: anytype) !void {
 
 pub fn TODO(self: *Logger, comptime fmt: []const u8, args: anytype) noreturn {
     self.LOG("TODO", fmt, args) catch {};
-    std.os.exit(1);
+    std.c.exit(1);
 }
 
 pub fn printfln(comptime fmt: []const u8, args: anytype) !void {
